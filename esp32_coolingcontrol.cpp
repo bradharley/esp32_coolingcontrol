@@ -699,8 +699,6 @@ void networkcheck()
   }
   if ((WiFi.status() == WL_CONNECTED) && !client.connected() && (conn_stat != 3))
   {
-    //if ((WiFi.status() == WL_CONNECTED) && !client.connected() )  {
-
     conn_stat = 2;
   }
   if ((WiFi.status() == WL_CONNECTED) && client.connected() && (conn_stat != 5))
@@ -720,15 +718,11 @@ void networkcheck()
     if (millis() - lastWiFiErr > 30000)
     {
       Serial.println("WiFi starting, at millis : " + String(millis()));
-        //WiFi.begin(WiFi_SSID, WiFi_PW);  do I need to do another begin on reconnect?
-        // not sure if constant retry creates problems...
       lastWiFiErr = millis();
       }
       break;
   case 2: // WiFi up, MQTT down: start MQTT
       Serial.println("WiFi up, MQTT down: start MQTT");
-      //client.setServer(MQTT_BROKER, 1883);
-      //client.begin(MQTT_BROKER, 8883, TCP);           //   config MQTT Server, use port 8883 for secure connection
       client.connect(HOSTNAME);
     server.begin(); //TCP server start
       conn_stat = 3;
@@ -765,6 +759,9 @@ void setup()
 {
   setCpuFrequencyMhz(80); //Default is 240mhz, optionally 160 or 80.  DS18b20 periodic error at 80?
 
+  Serial.begin(115200);
+  Serial.println("Booting");
+  
   EEPROM.begin(EEPROM_SIZE);
   referSetpointF = (EEPROM.read(0) << 8) + EEPROM.read(1);   //target to hold:  39?  ESP32 ONLY
   freezerSetpointF = (EEPROM.read(2) << 8) + EEPROM.read(3); //target to hold:  39?  ESP32 ONLY
@@ -806,8 +803,6 @@ void setup()
     delay(250);
   }
 
-  Serial.begin(115200);
-  Serial.println("Booting");
 
   //initial setup of networking  --probably not needed with network function...
   WiFi.mode(WIFI_STA);
