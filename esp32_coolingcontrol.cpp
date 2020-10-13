@@ -47,8 +47,8 @@
 const char *HOSTNAME = "chilly"; // change according your setup : it is used in OTA and as MQTT identifier
 const char *WiFi_SSID = "SVPerspective";
 const char *WiFi_PW = "8187314277";
-const char *VERSION = "{\"Version\":\"referdev_v3\"}";
-const char *STATUS_MSG = "{\"Message\":\"testing on boat\"}";
+const char *VERSION = "{\"Version\":\"0.5\"}";
+const char *STATUS_MSG = "{\"Message\":\"Refrigeration Controller\"}";
 
 uint8_t conn_stat = 0;       // Connection status for WiFi and MQTT:
 /*
@@ -118,6 +118,7 @@ unsigned long lastCeilingAdjustment = 0;                 //for adjustceiling fun
 //Start Cooling Variables
 float boxTemperatureF;
 float referTemperatureF;
+float referTemperatureTestF;  //mobile temperature probe.
 int referSetpointF;             // = 39; // This loads from EEPROM. //target to hold:  39?  ESP32 ONLY
 float referSetpointoffsetF = 5; //temperature at which full cooling kicks in
 const int referCfloor = 92;     // 92 is approximately full speed....3500rpm
@@ -167,6 +168,13 @@ void publishmqtt()
   dtostrf(referTemperatureK, 1, 2, tempString); //from float to char array
   client.publish("chilly/refrigerator/temperatureK", tempString);
 
+  dtostrf(referTemperatureTestF, 1, 2, tempString); //from float to char array
+  client.publish("chilly/refrigerator/temperature_testF", tempString);
+  
+  float referTemperatureTestK = (referTemperatureTestF - 32) * 5 / 9 + 273.15;
+  dtostrf(referTemperatureTestK, 1, 2, tempString); //from float to char array
+  client.publish("chilly/refrigerator/temperature_testK", tempString);
+  
   itoa(referCvalue, tempString, 10); //from integet to char array
   client.publish("chilly/refrigerator/compressorPinValue", tempString);
 
@@ -208,8 +216,8 @@ void getTemps()
 // by using either oneWire.search(deviceAddress) or individually via
 // sensors.getAddress(deviceAddress, index)
   DeviceAddress boxThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};
-  DeviceAddress referThermometer = {0x28, 0x71, 0xFF, 0x06, 0x2F, 0x14, 0x01, 0x33};
-  DeviceAddress referThermometerTest = {0x28, 0xDD, 0x64, 0x1F, 0x2F, 0x14, 0x01, 0x7E};   //currently lingering bottom of fridge
+  DeviceAddress referThermometer = {0x28, 0xDD, 0x64, 0x1F, 0x2F, 0x14, 0x01, 0x7E};  
+  DeviceAddress referThermometerTest = {0x28, 0x71, 0xFF, 0x06, 0x2F, 0x14, 0x01, 0x33};   //currently lingering middle Stbd of fridge
   DeviceAddress freezerThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};     //replace
   DeviceAddress freezerThermometerTest = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E}; //replace
   
@@ -244,6 +252,19 @@ void getTemps()
   {
     referTemperatureF = temp;
     Serial.println(referTemperatureF);
+  }  
+  
+  temp = sensors.getTempF(referThermometerTest);
+
+  if (temp > 180 || temp < 10)
+  { // range -55 to 125 C.  retry.   Getting -127C/196.60F and sometimes zero, apparent timing after "sensors.requestTemperatures()"
+    Serial.println("ERROR reading Temperature: ");
+    client.publish("chilly/refrigerator/error", "ERROR reading Temperature");
+  }
+  else
+  {
+    referTemperatureTestF = temp;
+    Serial.println(referTemperatureTestF);
   }
 
   temp = sensors.getTempF(referThermometer); ////change to freezer
@@ -312,7 +333,7 @@ uint8_t findDevices(int pin)
 void coolingControl()
 { //<------------------------------------------------------COOLING CONTROL
   tcpClient.print(millis());
-  tcpClient.println("entering cooling control");
+  tcpClient.println(": entering cooling control");
   //refrigerator section
   if (referTemperatureF > referSetpointF + 1 && referCvalue == 0)
   {
@@ -328,10 +349,10 @@ void coolingControl()
       { //too hot, full cooling
         referCvalue = referCfloor;
         referCceiling = referCfloor;
-        Serial.print("to hot!!!  full speed \n");
+        Serial.println("to hot!!!  full speed");
         client.publish("chilly/refrigerator/lastError", "refer too hot", true);
-        tcpClient.print("to hot!!!  full speed \n");
-        referFanspeed = 255; //Turn up the fan to default run speed.
+        tcpClient.println("to hot!!!  full speed");
+        referFanspeed = 255; //Turn up the fan to default max speed.
       }
 
       if (referTemperatureF <= referSetpointF - cutoffOffsetF && referCvalue != 0)
@@ -783,13 +804,13 @@ void setup()
 
   //initialize duty cycle arrays
   memset(referDutycyclearray, 0, sizeof(referDutycyclearray));
-  for (int i = 0; i < sizeof(referDutycyclearray) / sizeof(referDutycyclearray[0]); i += 2)
-  { //   Should be 50% as initialized.
+  for (int i = 0; i < sizeof(referDutycyclearray) / sizeof(referDutycyclearray[0]); i += 3)
+  { //   Should be 33% as initialized.
     referDutycyclearray[i] = 1;
   }
   memset(freezerDutycyclearray, 0, sizeof(freezerDutycyclearray));
-  for (int i = 0; i < sizeof(freezerDutycyclearray) / sizeof(freezerDutycyclearray[0]); i += 2)
-  { //   Should be 50% as initialized.
+  for (int i = 0; i < sizeof(freezerDutycyclearray) / sizeof(freezerDutycyclearray[0]); i += 3)
+  { //   Should be 33% as initialized.
     freezerDutycyclearray[i] = 1;
   }
 
@@ -905,7 +926,7 @@ void loop()
     lastCoolingAdjustment = millis();
     //analogWrite(10, referFanspeed);
     //ledcWrite(REFER_FAN_PWM_CHANNEL, dutyCycle);
-    ledcWrite(REFER_FAN_PWM_CHANNEL, 255 - referFanspeed); //set fan speed.
+    ledcWrite(REFER_FAN_PWM_CHANNEL, 255 - referFanspeed); //set fan speed.  Inverted as ran through transistor
     calcDutycycle();
   }
 
