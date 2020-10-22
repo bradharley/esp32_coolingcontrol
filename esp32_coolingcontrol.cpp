@@ -337,9 +337,9 @@ void coolingControl()
   //refrigerator section
   if (referTemperatureF > referSetpointF + 1 && referCvalue == 0)
   {
-    referCvalue = referCceiling; //set back to lowest based on duty cycle speed
+    referCvalue = referCceiling; //turn on and set back to lowest based on duty cycle speed
     // Serial.print ("turning on compressor \n");
-    referFanspeed = 96; //Turn up the fan to default run speed.
+    referFanspeed = 128; //Turn up the fan to default run speed.  96 ran fine , try 128 with smaller fan..   52 minimum?
   }
   else
   {
