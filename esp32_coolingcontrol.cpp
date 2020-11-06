@@ -136,7 +136,7 @@ int freezerCvalue = 0; //Pin value
 int freezerCspeed = 0; //approximate RPM
 int freezerFanspeed = 0;
 
-float cutoffOffsetF = .25; //offset where compressors shutoff below setPointF
+float cutoffOffsetF = 0; //offset where compressors shutoff below setPointF
 
 //arrays below use lots of global memory....
 bool referDutycyclearray[2 * 3600 / coolingPeriod]; // one value per minute for X: 2 hours (7200) or 1 hr (3600)
@@ -335,11 +335,11 @@ void coolingControl()
   tcpClient.print(millis());
   tcpClient.println(": entering cooling control");
   //refrigerator section
-  if (referTemperatureF > referSetpointF + 1 && referCvalue == 0)
+  if (referTemperatureF > referSetpointF + .5 && referCvalue == 0)
   {
     referCvalue = referCceiling; //turn on and set back to lowest based on duty cycle speed
     // Serial.print ("turning on compressor \n");
-    referFanspeed = 128; //Turn up the fan to default run speed.  96 ran fine , try 128 with smaller fan..   52 minimum?
+    referFanspeed = 96; //Turn up the fan to default run speed.  96 ran fine , try 128 with smaller fan..   52 minimum?
   }
   else
   {
@@ -364,7 +364,7 @@ void coolingControl()
     }
   }
   //Freezer Section
-  if (freezerTemperatureF > freezerSetpointF + 1 && freezerCvalue == 0)
+  if (freezerTemperatureF > freezerSetpointF + .5 && freezerCvalue == 0)
   {
     freezerCvalue = freezerCceiling; //set back to lowest based on duty cycle speed
     // Serial.print ("turning on compressor \n");
