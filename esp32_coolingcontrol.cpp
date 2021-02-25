@@ -109,7 +109,7 @@ unsigned long lastWiFiErr = 0;
 unsigned long lastMsg = 0;
 const unsigned long sensorPeriod = 20;  //timing between sensor pulls.  20s default
 const unsigned long coolingPeriod = 60; //in seconds, timing between refrigeration adjustments.  60s default
-const unsigned long ceilingPeriod = 5;  //in minutes, timing between refrigeration adjustments.  5m default
+const unsigned long ceilingPeriod = 10;  //in minutes, timing between refrigeration adjustments.  5m default
 
 unsigned long lastSensorReading = sensorPeriod * 1000UL; //set inital value to not wait on first execute.  USE UL for unsigned long multipliction
 unsigned long lastCoolingAdjustment = 0;                 //coolingPeriod * 1000UL;
@@ -145,7 +145,7 @@ int referDutycycle = 50;                              // Should match the initia
 bool freezerDutycyclearray[2 * 3600 / coolingPeriod]; // one value per minute for n hrs as above
 int freezerDutycycleindex = 0;                        //should be same as refer.  No reason for duplicate
 int freezerDutycycle = 50;                            // Should match the initialization in setup()
-const int maxDutycycle = 65;                          //initialized as 50
+const int maxDutycycle = 50;                          //initialized as 50
 //End cooling variables
 
 void publishmqtt()
@@ -335,7 +335,7 @@ void coolingControl()
   tcpClient.print(millis());
   tcpClient.println(": entering cooling control");
   //refrigerator section
-  if (referTemperatureF > referSetpointF + .5 && referCvalue == 0)
+  if (referTemperatureF > referSetpointF + .25 && referCvalue == 0)
   {
     referCvalue = referCceiling; //turn on and set back to lowest based on duty cycle speed
     // Serial.print ("turning on compressor \n");
