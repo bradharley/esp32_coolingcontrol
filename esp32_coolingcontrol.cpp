@@ -15,6 +15,7 @@
    referdev_v7 -- devkit-c esp32
       --moving to git and platformio, including reformat to cpp.   Assess doing defines.
       --Renaming file and moving to git version control
+   .5+ moving to git version control.
 
 
 
@@ -47,7 +48,7 @@
 const char *HOSTNAME = "chilly"; // change according your setup : it is used in OTA and as MQTT identifier
 const char *WiFi_SSID = "SVPerspective";
 const char *WiFi_PW = "8187314277";
-const char *VERSION = "{\"Version\":\"0.5\"}";
+const char *VERSION = "{\"Version\":\"0.51\"}";
 const char *STATUS_MSG = "{\"Message\":\"Refrigeration Controller\"}";
 
 uint8_t conn_stat = 0;       // Connection status for WiFi and MQTT:
@@ -109,7 +110,7 @@ unsigned long lastWiFiErr = 0;
 unsigned long lastMsg = 0;
 const unsigned long sensorPeriod = 20;  //timing between sensor pulls.  20s default
 const unsigned long coolingPeriod = 60; //in seconds, timing between refrigeration adjustments.  60s default
-const unsigned long ceilingPeriod = 10;  //in minutes, timing between refrigeration adjustments.  5m default
+const unsigned long ceilingPeriod = 5;  //in minutes, timing between refrigeration adjustments.  5m default
 
 unsigned long lastSensorReading = sensorPeriod * 1000UL; //set inital value to not wait on first execute.  USE UL for unsigned long multipliction
 unsigned long lastCoolingAdjustment = 0;                 //coolingPeriod * 1000UL;
@@ -337,7 +338,8 @@ void coolingControl()
   //refrigerator section
   if (referTemperatureF > referSetpointF + .25 && referCvalue == 0)
   {
-    referCvalue = referCceiling; //turn on and set back to lowest based on duty cycle speed
+    referCvalue = 255; //turn on and set back to lowest value to protect against high startup pressure
+    //referCvalue = referCceiling; //turn on and set back to lowest based on duty cycle speed -previous logic-
     // Serial.print ("turning on compressor \n");
     referFanspeed = 96; //Turn up the fan to default run speed.  96 ran fine , try 128 with smaller fan..   52 minimum?
   }
@@ -354,7 +356,11 @@ void coolingControl()
         tcpClient.println("to hot!!!  full speed");
         referFanspeed = 255; //Turn up the fan to default max speed.
       }
-
+      else
+      {
+        referCvalue = referCceiling; //set back to ceiling based on duty cycle.  Pair with initial slow startup above
+      }
+      
       if (referTemperatureF <= referSetpointF - cutoffOffsetF && referCvalue != 0)
       {
         // Serial.print ("at or below cutoff, turning off compressor \n");
@@ -842,6 +848,7 @@ void setup()
 
   // Start the DS18B20 sensor
   sensors.begin();
+  sensors.setResolution(12);
   getTemps(); //initial pull of temperatures to ensure we have the data on first publish
 
   // ARDUINOOTA START //
@@ -904,7 +911,7 @@ void loop()
   // start section with tasks where WiFi/MQTT is required
   if (conn_stat == 5)
   {
-    if (millis() - lastMsg > 15000)
+    if (millis() - lastMsg > 5000)  //5 seconds.   15s previously
     {             // Start send status every n sec (just as an example)
       getTemps(); //run when connnected
       lastSensorReading = millis();
