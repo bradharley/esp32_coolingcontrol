@@ -51,7 +51,7 @@ const char *WiFi_PW = "8187314277";
 const char *VERSION = "{\"Version\":\"0.51\"}";
 const char *STATUS_MSG = "{\"Message\":\"Refrigeration Controller\"}";
 
-uint8_t conn_stat = 0;       // Connection status for WiFi and MQTT:
+uint8_t conn_stat = 0; // Connection status for WiFi and MQTT:
 /*
                                               // status |   WiFi   |    MQTT
                                               // -------+----------+------------
@@ -117,16 +117,18 @@ unsigned long lastCoolingAdjustment = 0;                 //coolingPeriod * 1000U
 unsigned long lastCeilingAdjustment = 0;                 //for adjustceiling function--duty cycle calculation.
 
 //Start Cooling Variables
+int referMode = 0; // 0 is auto, 1 is manual for fan, dutycycle and compressor speed, 9 is off.
 float boxTemperatureF;
 float referTemperatureF;
-float referTemperatureTestF;  //mobile temperature probe.
+float referTemperatureTestF;    //mobile temperature probe.
 int referSetpointF;             // = 39; // This loads from EEPROM. //target to hold:  39?  ESP32 ONLY
 float referSetpointoffsetF = 5; //temperature at which full cooling kicks in
 const int referCfloor = 92;     // 92 is approximately full speed....3500rpm
 int referCceiling = 255;
-int referCvalue = 0; //Pin value
+int referCvalue = 0; //Pin value, 0 off 92 full speed ~2ma 255 low speed ~5ma
 int referCspeed = 0; //approximate RPM  //should probably eliminate and just calculate.
 int referFanspeed = 0;
+int referFanbasespeed = 92;  //92 works fine.   set base speed vi mqtt
 
 float freezerTemperatureF;
 int freezerSetpointF;             // = 0; //This loads from EEPROM //target to hold:  0?   ESP32 ONLY
@@ -142,12 +144,16 @@ float cutoffOffsetF = 0; //offset where compressors shutoff below setPointF
 //arrays below use lots of global memory....
 bool referDutycyclearray[2 * 3600 / coolingPeriod]; // one value per minute for X: 2 hours (7200) or 1 hr (3600)
 int referDutycycleindex = 0;
-int referDutycycle = 50;                              // Should match the initialization in setup()
+int referDutycycle;                                   // Should match the initialization in setup()
 bool freezerDutycyclearray[2 * 3600 / coolingPeriod]; // one value per minute for n hrs as above
 int freezerDutycycleindex = 0;                        //should be same as refer.  No reason for duplicate
-int freezerDutycycle = 50;                            // Should match the initialization in setup()
+int freezerDutycycle;                                 // Should match the initialization in setup()
 const int maxDutycycle = 50;                          //initialized as 50
 //End cooling variables
+
+//pre define functions
+void calcDutycycle();
+//
 
 void publishmqtt()
 {
@@ -171,11 +177,11 @@ void publishmqtt()
 
   dtostrf(referTemperatureTestF, 1, 2, tempString); //from float to char array
   client.publish("chilly/refrigerator/temperature_testF", tempString);
-  
+
   float referTemperatureTestK = (referTemperatureTestF - 32) * 5 / 9 + 273.15;
   dtostrf(referTemperatureTestK, 1, 2, tempString); //from float to char array
   client.publish("chilly/refrigerator/temperature_testK", tempString);
-  
+
   itoa(referCvalue, tempString, 10); //from integet to char array
   client.publish("chilly/refrigerator/compressorPinValue", tempString);
 
@@ -187,6 +193,15 @@ void publishmqtt()
 
   itoa(referSetpointF, tempString, 10); //from float to char array
   client.publish("chilly/refrigerator/setPointF", tempString);
+
+  itoa(referFanspeed, tempString, 10); //from integet to char array
+  client.publish("chilly/refrigerator/fanspeed", tempString);
+  
+  itoa(referFanbasespeed, tempString, 10); //from integet to char array
+  client.publish("chilly/refrigerator/fanspeed_base", tempString);
+
+  itoa(referMode, tempString, 10); //from integet to char array
+  client.publish("chilly/refrigerator/mode", tempString);
 
   dtostrf(freezerTemperatureF, 1, 2, tempString); //from float to char array
   client.publish("chilly/freezer/temperatureF", tempString);
@@ -211,17 +226,17 @@ void publishmqtt()
 
 void getTemps()
 {
-//DeviceAddress referThermometer, outsideThermometer;
-// Assign address manually. The addresses below will beed to be changed
-// to valid device addresses on your bus. Device address can be retrieved
-// by using either oneWire.search(deviceAddress) or individually via
-// sensors.getAddress(deviceAddress, index)
+  //DeviceAddress referThermometer, outsideThermometer;
+  // Assign address manually. The addresses below will beed to be changed
+  // to valid device addresses on your bus. Device address can be retrieved
+  // by using either oneWire.search(deviceAddress) or individually via
+  // sensors.getAddress(deviceAddress, index)
   DeviceAddress boxThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};
-  DeviceAddress referThermometer = {0x28, 0xDD, 0x64, 0x1F, 0x2F, 0x14, 0x01, 0x7E};  
+  DeviceAddress referThermometer = {0x28, 0xDD, 0x64, 0x1F, 0x2F, 0x14, 0x01, 0x7E};
   DeviceAddress referThermometerTest = {0x28, 0x71, 0xFF, 0x06, 0x2F, 0x14, 0x01, 0x33};   //currently lingering middle Stbd of fridge
   DeviceAddress freezerThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};     //replace
   DeviceAddress freezerThermometerTest = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E}; //replace
-  
+
   tcpClient.print(millis());
   tcpClient.println(": entering getTemps()");
 
@@ -253,8 +268,8 @@ void getTemps()
   {
     referTemperatureF = temp;
     Serial.println(referTemperatureF);
-  }  
-  
+  }
+
   temp = sensors.getTempF(referThermometerTest);
 
   if (temp > 180 || temp < 10)
@@ -336,39 +351,49 @@ void coolingControl()
   tcpClient.print(millis());
   tcpClient.println(": entering cooling control");
   //refrigerator section
-  if (referTemperatureF > referSetpointF + .25 && referCvalue == 0)
+  if (referMode == 0)
   {
-    referCvalue = 255; //turn on and set back to lowest value to protect against high startup pressure
-    //referCvalue = referCceiling; //turn on and set back to lowest based on duty cycle speed -previous logic-
-    // Serial.print ("turning on compressor \n");
-    referFanspeed = 96; //Turn up the fan to default run speed.  96 ran fine , try 128 with smaller fan..   52 minimum?
-  }
-  else
-  {
-    if (referCvalue != 0)
-    { //Compressor is ON for remaining function.
-      if (referTemperatureF > referSetpointF + referSetpointoffsetF)
-      { //too hot, full cooling
-        referCvalue = referCfloor;
-        referCceiling = referCfloor;
-        Serial.println("to hot!!!  full speed");
-        client.publish("chilly/refrigerator/lastError", "refer too hot", true);
-        tcpClient.println("to hot!!!  full speed");
-        referFanspeed = 255; //Turn up the fan to default max speed.
-      }
-      else
-      {
-        referCvalue = referCceiling; //set back to ceiling based on duty cycle.  Pair with initial slow startup above
-      }
-      
-      if (referTemperatureF <= referSetpointF - cutoffOffsetF && referCvalue != 0)
-      {
-        // Serial.print ("at or below cutoff, turning off compressor \n");
-        referCvalue = 0;
-        referFanspeed = 0; //52; //slow down the fan to min speed, 20%
+    if (referTemperatureF > referSetpointF + .25 && referCvalue == 0)
+    {
+      referCvalue = 255; //turn on and set back to lowest value to protect against high startup pressure
+      //referCvalue = referCceiling; //turn on and set back to lowest based on duty cycle speed -previous logic-
+      // Serial.print ("turning on compressor \n");
+      // referFanspeed = referFanbasespeed; //-cool 1 min before turning on fan.  Turn up the fan to default run speed.  96 ran fine , try 128 with smaller fan..   52 minimum?
+    }
+    else
+    {
+      if (referCvalue != 0)
+      { //Compressor is ON for remaining function.
+        if (referTemperatureF > referSetpointF + referSetpointoffsetF)
+        { //too hot, full cooling
+          referCvalue = referCfloor;
+          referCceiling = referCfloor;
+          Serial.println("to hot!!!  full speed");
+          client.publish("chilly/refrigerator/lastError", "refer too hot", true);
+          tcpClient.println("to hot!!!  full speed");
+          referFanspeed = 255; //Turn up the fan to default max speed.
+        }
+        else
+        {
+          referCvalue = referCceiling; //set back to ceiling based on duty cycle.  Pair with initial slow startup above
+          referFanspeed = referFanbasespeed;  //hold at base speed, default 96 changeable 
+        }
+
+        if (referTemperatureF <= referSetpointF - cutoffOffsetF && referCvalue != 0)
+        {
+          // Serial.print ("at or below cutoff, turning off compressor \n");
+          referCvalue = 0;
+          referFanspeed = 0; //52; //slow down the fan to off
+        }
       }
     }
   }
+  if (referMode == 9)
+  {
+    referCvalue = 0;
+    referFanspeed = 0;
+  }
+
   //Freezer Section
   if (freezerTemperatureF > freezerSetpointF + .5 && freezerCvalue == 0)
   {
@@ -397,6 +422,7 @@ void coolingControl()
       }
     }
   }
+
   //Refer Duty cycle stuff
   if (referCvalue == 0)
   {
@@ -440,6 +466,11 @@ void coolingControl()
   {
     freezerDutycycleindex++;
   }
+  /* //debug
+  tcpClient.print(millis());
+  tcpClient.print(": referCvalue: ");
+  tcpClient.println(referCvalue);
+  */ 
 }
 
 void adjustCeiling()
@@ -684,10 +715,20 @@ void callback(char *topic, byte *message, unsigned int length)
       //itoa(referCvalue, tempString, 10);   //from integet to char array
     }
   }
-  if (String(topic) == "chilly/output/refrigerator/setfan")
+  if (String(topic) == "chilly/output/refrigerator/setmode")
+  {
+    referMode = messageTemp.toInt();
+  }
+
+  if (String(topic) == "chilly/output/refrigerator/setfanspeed")
   {
     referFanspeed = messageTemp.toInt();
     ledcWrite(REFER_FAN_PWM_CHANNEL, 255 - referFanspeed);
+  }
+
+    if (String(topic) == "chilly/output/refrigerator/setfanspeed_base")
+  {
+    referFanbasespeed = messageTemp.toInt();
   }
 
   if (String(topic) == "chilly/output/refrigerator/setdutycycle")
@@ -736,49 +777,49 @@ void networkcheck()
   switch (conn_stat)
   {
   case 0: // MQTT and WiFi down: start WiFi
-      Serial.println("MQTT and WiFi down: start WiFi");
-      WiFi.mode(WIFI_STA);
-      WiFi.begin(WiFi_SSID, WiFi_PW);
-      conn_stat = 1;
-      break;
+    Serial.println("MQTT and WiFi down: start WiFi");
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(WiFi_SSID, WiFi_PW);
+    conn_stat = 1;
+    break;
   case 1: // WiFi starting, holding pattern until WiFi up
     if (millis() - lastWiFiErr > 30000)
     {
       Serial.println("WiFi starting, at millis : " + String(millis()));
       lastWiFiErr = millis();
-      }
-      break;
+    }
+    break;
   case 2: // WiFi up, MQTT down: start MQTT
-      Serial.println("WiFi up, MQTT down: start MQTT");
-      client.connect(HOSTNAME);
+    Serial.println("WiFi up, MQTT down: start MQTT");
+    client.connect(HOSTNAME);
     server.begin(); //TCP server start
-      conn_stat = 3;
-      break;
+    conn_stat = 3;
+    break;
   case 3: // WiFi up, MQTT starting, holding pattern until mqtt up.
     if (client.connected())
     {
-        conn_stat = 4;
-      }
+      conn_stat = 4;
+    }
     else
     {
       if (millis() - lastWiFiErr > 30000)
       {
         Serial.println("WiFi up, MQTT starting, at millis : " + String(millis()));
         client.connect(HOSTNAME); // retry every time period above.  Do I need to reconnect if 2 fails?
-          // not sure if constant retry creates problems...
+                                  // not sure if constant retry creates problems...
         lastWiFiErr = millis();
-        }
       }
-      break;
+    }
+    break;
   case 4: // WiFi up, MQTT up: finish MQTT configuration
-      Serial.println("WiFi up, MQTT up: finish MQTT configuration");
-      client.subscribe("chilly/output");
-      client.subscribe("chilly/output/#");
-      //client.subscribe(output_topic);
-      //client.publish("chilly/status", STATUS_MSG, true);               //      send status to broker
-      //client.publish("chilly/version", VERSION, true);             //      send version to broker
-      conn_stat = 5;
-      break;
+    Serial.println("WiFi up, MQTT up: finish MQTT configuration");
+    client.subscribe("chilly/output");
+    client.subscribe("chilly/output/#");
+    //client.subscribe(output_topic);
+    //client.publish("chilly/status", STATUS_MSG, true);               //      send status to broker
+    //client.publish("chilly/version", VERSION, true);             //      send version to broker
+    conn_stat = 5;
+    break;
   }
 }
 
@@ -788,7 +829,7 @@ void setup()
 
   Serial.begin(115200);
   Serial.println("Booting");
-  
+
   EEPROM.begin(EEPROM_SIZE);
   referSetpointF = (EEPROM.read(0) << 8) + EEPROM.read(1);   //target to hold:  39?  ESP32 ONLY
   freezerSetpointF = (EEPROM.read(2) << 8) + EEPROM.read(3); //target to hold:  39?  ESP32 ONLY
@@ -810,15 +851,16 @@ void setup()
 
   //initialize duty cycle arrays
   memset(referDutycyclearray, 0, sizeof(referDutycyclearray));
-  for (int i = 0; i < sizeof(referDutycyclearray) / sizeof(referDutycyclearray[0]); i += 3)
-  { //   Should be 33% as initialized.
+  for (int i = 0; i < sizeof(referDutycyclearray) / sizeof(referDutycyclearray[0]); i += 2)
+  { //   Should be 50% as initialized.
     referDutycyclearray[i] = 1;
   }
   memset(freezerDutycyclearray, 0, sizeof(freezerDutycyclearray));
-  for (int i = 0; i < sizeof(freezerDutycyclearray) / sizeof(freezerDutycyclearray[0]); i += 3)
-  { //   Should be 33% as initialized.
+  for (int i = 0; i < sizeof(freezerDutycyclearray) / sizeof(freezerDutycyclearray[0]); i += 2)
+  { //   Should be 50% as initialized.
     freezerDutycyclearray[i] = 1;
   }
+  calcDutycycle(); //define initial variables
 
   pinMode(LED_PIN, OUTPUT); //for play and test of onboard LED.   blinky
   // blink to show loaded sketch
@@ -829,7 +871,6 @@ void setup()
     digitalWrite(LED_PIN, LOW);
     delay(250);
   }
-
 
   //initial setup of networking  --probably not needed with network function...
   WiFi.mode(WIFI_STA);
@@ -911,9 +952,9 @@ void loop()
   // start section with tasks where WiFi/MQTT is required
   if (conn_stat == 5)
   {
-    if (millis() - lastMsg > 5000)  //5 seconds.   15s previously
-    {             // Start send status every n sec (just as an example)
-      getTemps(); //run when connnected
+    if (millis() - lastMsg > 5000) //5 seconds.   15s previously
+    {                              // Start send status every n sec (just as an example)
+      getTemps();                  //run when connnected
       lastSensorReading = millis();
 
       publishmqtt();
@@ -930,16 +971,12 @@ void loop()
   if (millis() - lastCoolingAdjustment > coolingPeriod * 1000UL)
   { //in seconds default 60
     coolingControl();
-    lastCoolingAdjustment = millis();
-    //analogWrite(10, referFanspeed);
-    //ledcWrite(REFER_FAN_PWM_CHANNEL, dutyCycle);
-    ledcWrite(REFER_FAN_PWM_CHANNEL, 255 - referFanspeed); //set fan speed.  Inverted as ran through transistor
     calcDutycycle();
+    lastCoolingAdjustment = millis();
   }
 
   if (millis() - lastCeilingAdjustment > ceilingPeriod * 60UL * 1000UL)
   { //in Minutes   default 5.
-    //calcDutycycle(); //should not be necessary as it's recalculated at end of every coolingControl(), every 60s
     adjustCeiling();
     lastCeilingAdjustment = millis();
   }
@@ -952,6 +989,7 @@ void loop()
 
   ledcWrite(REFER_PWM_CHANNEL, referCvalue);
   ledcWrite(FREEZER_PWM_CHANNEL, freezerCvalue);
+  ledcWrite(REFER_FAN_PWM_CHANNEL, 255 - referFanspeed); //set fan speed.  Inverted as ran through transistor
 
   //end cooling logic
 
