@@ -43,7 +43,7 @@
 #include <DallasTemperature.h>
 #include <OneWire.h>
 #include <EEPROM.h>
-#define EEPROM_SIZE 4 //store 2 numbers, 0-255 in 4 bytes.  Perfect for F Temperatures as INTs, 0-1 is refer, 2-3 is freezer setpoint
+#define EEPROM_SIZE 8 //store 4 numbers, 0-255 in 4 bytes.  Perfect for F Temperatures as INTs, 0-1 is refer, 2-3 is freezer setpoint
 
 const char *HOSTNAME = "chilly"; // change according your setup : it is used in OTA and as MQTT identifier
 const char *WiFi_SSID = "SVPerspective";
@@ -84,7 +84,8 @@ const int LED_PIN = 2; //GPIO 2 on these Hiletgo boards, doesn't exist on espres
 const int REFER_PIN = 16;   // GPIO number for ReferControl
 const int FREEZER_PIN = 17; // GPIO number for FreezerControl
 const int REFER_FAN_PIN = 27;
-const int FREEZER_FAN_PIN = 25;
+const int FREEZER_FAN_PIN = 12; //disconnected
+const int COMPRESSOR_BOX_FAN_PIN = 25;
 
 // setting PWM properties
 const int PWM_FREQ_COMPRESSORS = 5000;
@@ -93,6 +94,7 @@ const int REFER_PWM_CHANNEL = 0;
 const int FREEZER_PWM_CHANNEL = 1;
 const int REFER_FAN_PWM_CHANNEL = 2;
 const int FREEZER_FAN_PWM_CHANNEL = 3;
+const int COMPRESSOR_BOX_FAN_PWM_CHANNEL = 4;
 
 const int PWM_RESOLUTION_0 = 8;
 
@@ -109,7 +111,7 @@ unsigned long lastTask = 0;   // counter in example code for conn_stat <> 5
 unsigned long lastWiFiErr = 0;
 unsigned long lastMsg = 0;
 const unsigned long sensorPeriod = 20;  //timing between sensor pulls.  20s default
-const unsigned long coolingPeriod = 60; //in seconds, timing between refrigeration adjustments.  60s default
+const unsigned long coolingPeriod = 30; //in seconds, timing between refrigeration adjustments.  60s default
 const unsigned long ceilingPeriod = 5;  //in minutes, timing between refrigeration adjustments.  5m default
 
 unsigned long lastSensorReading = sensorPeriod * 1000UL; //set inital value to not wait on first execute.  USE UL for unsigned long multipliction
@@ -117,8 +119,11 @@ unsigned long lastCoolingAdjustment = 0;                 //coolingPeriod * 1000U
 unsigned long lastCeilingAdjustment = 0;                 //for adjustceiling function--duty cycle calculation.
 
 //Start Cooling Variables
-int referMode = 0; // 0 is auto, 1 is manual for fan, dutycycle and compressor speed, 9 is off.
+int referMode = 0; // 0 auto, 1 manual for fan, dutycycle and compressor speed, 8 defrost, 9 off
 float boxTemperatureF;
+float compressorBoxTemperatureF;
+int compressorBoxfanspeed = 128; //default 128.  Play with noise and temp.  255 is OFF, 0 min spin
+
 float referTemperatureF;
 float referTemperatureTestF;    //mobile temperature probe.
 int referSetpointF;             // = 39; // This loads from EEPROM. //target to hold:  39?  ESP32 ONLY
@@ -128,7 +133,7 @@ int referCceiling = 255;
 int referCvalue = 0; //Pin value, 0 off 92 full speed ~2ma 255 low speed ~5ma
 int referCspeed = 0; //approximate RPM  //should probably eliminate and just calculate.
 int referFanspeed = 0;
-int referFanbasespeed = 92;  //92 works fine.   set base speed vi mqtt
+int referFanbasespeed = 92; //92 works fine.   set base speed vi mqtt
 
 float freezerTemperatureF;
 int freezerSetpointF;             // = 0; //This loads from EEPROM //target to hold:  0?   ESP32 ONLY
@@ -195,10 +200,16 @@ void publishmqtt()
   client.publish("chilly/refrigerator/setPointF", tempString);
 
   itoa(referFanspeed, tempString, 10); //from integet to char array
-  client.publish("chilly/refrigerator/fanspeed", tempString);
-  
+  client.publish("chilly/refrigerator/fanSpeed", tempString);
+
   itoa(referFanbasespeed, tempString, 10); //from integet to char array
-  client.publish("chilly/refrigerator/fanspeed_base", tempString);
+  client.publish("chilly/refrigerator/fanBaseSpeed", tempString);
+
+  itoa(compressorBoxfanspeed, tempString, 10); //from integet to char array
+  client.publish("chilly/compressorBoxFanSpeed", tempString);
+
+  dtostrf(compressorBoxTemperatureF, 1, 2, tempString); //from float to char array
+  client.publish("chilly/compressorBoxTemperatureF", tempString);
 
   itoa(referMode, tempString, 10); //from integet to char array
   client.publish("chilly/refrigerator/mode", tempString);
@@ -233,9 +244,10 @@ void getTemps()
   // sensors.getAddress(deviceAddress, index)
   DeviceAddress boxThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};
   DeviceAddress referThermometer = {0x28, 0xDD, 0x64, 0x1F, 0x2F, 0x14, 0x01, 0x7E};
-  DeviceAddress referThermometerTest = {0x28, 0x71, 0xFF, 0x06, 0x2F, 0x14, 0x01, 0x33};   //currently lingering middle Stbd of fridge
-  DeviceAddress freezerThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};     //replace
-  DeviceAddress freezerThermometerTest = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E}; //replace
+  DeviceAddress referThermometerTest = {0x28, 0x71, 0xFF, 0x06, 0x2F, 0x14, 0x01, 0x33};     //currently lingering middle Stbd of fridge
+  DeviceAddress freezerThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};       //replace
+  DeviceAddress freezerThermometerTest = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};   //replace
+  DeviceAddress compressorBoxThermometer = {0x28, 0x81, 0xC1, 0x26, 0x2F, 0x14, 0x01, 0x17}; //near compressors
 
   tcpClient.print(millis());
   tcpClient.println(": entering getTemps()");
@@ -244,7 +256,20 @@ void getTemps()
   delay(10); //give a little time to return.  Does not appear to help??
 
   //temperatureC = sensors.getTempCByIndex(0);
-  float temp = sensors.getTempF(boxThermometer);
+  float temp = sensors.getTempF(compressorBoxThermometer);
+
+  if (temp > 180 || temp < 10)
+  { // range -55 to 125 C.  retry.   Getting -127C/196.60F and sometimes zero, apparent timing after "sensors.requestTemperatures()"
+    Serial.println("ERROR reading Temperature: ");
+    client.publish("chilly/error", "ERROR reading compressor box Temperature");
+  }
+  else
+  {
+    compressorBoxTemperatureF = temp;
+    Serial.println(compressorBoxTemperatureF);
+  }
+
+  temp = sensors.getTempF(boxThermometer);
 
   if (temp > 180 || temp < 10)
   { // range -55 to 125 C.  retry.   Getting -127C/196.60F and sometimes zero, apparent timing after "sensors.requestTemperatures()"
@@ -375,8 +400,8 @@ void coolingControl()
         }
         else
         {
-          referCvalue = referCceiling; //set back to ceiling based on duty cycle.  Pair with initial slow startup above
-          referFanspeed = referFanbasespeed;  //hold at base speed, default 96 changeable 
+          referCvalue = referCceiling;       //set back to ceiling based on duty cycle.  Pair with initial slow startup above
+          referFanspeed = referFanbasespeed; //hold at base speed, default 96 changeable
         }
 
         if (referTemperatureF <= referSetpointF - cutoffOffsetF && referCvalue != 0)
@@ -388,6 +413,12 @@ void coolingControl()
       }
     }
   }
+  if (referMode == 8)
+  {
+    referCvalue = 0;
+    referFanspeed = 255;
+  }
+
   if (referMode == 9)
   {
     referCvalue = 0;
@@ -470,7 +501,7 @@ void coolingControl()
   tcpClient.print(millis());
   tcpClient.print(": referCvalue: ");
   tcpClient.println(referCvalue);
-  */ 
+  */
 }
 
 void adjustCeiling()
@@ -715,28 +746,37 @@ void callback(char *topic, byte *message, unsigned int length)
       //itoa(referCvalue, tempString, 10);   //from integet to char array
     }
   }
-  if (String(topic) == "chilly/output/refrigerator/setmode")
+
+  if (String(topic) == "chilly/output/setCompressorBoxFanSpeed")
+  {
+    compressorBoxfanspeed = messageTemp.toInt();
+  }
+
+  if (String(topic) == "chilly/output/refrigerator/setMode")
   {
     referMode = messageTemp.toInt();
   }
 
-  if (String(topic) == "chilly/output/refrigerator/setfanspeed")
+  if (String(topic) == "chilly/output/refrigerator/setFanSpeed")
   {
     referFanspeed = messageTemp.toInt();
     ledcWrite(REFER_FAN_PWM_CHANNEL, 255 - referFanspeed);
   }
 
-    if (String(topic) == "chilly/output/refrigerator/setfanspeed_base")
+  if (String(topic) == "chilly/output/refrigerator/setFanBaseSpeed")
   {
     referFanbasespeed = messageTemp.toInt();
+    EEPROM.write(4, referFanbasespeed >> 8);   //(address, value(byte))
+    EEPROM.write(5, referFanbasespeed & 0xFF); //(address, value(byte))
+    EEPROM.commit();
   }
 
-  if (String(topic) == "chilly/output/refrigerator/setdutycycle")
+  if (String(topic) == "chilly/output/refrigerator/setDutyCycle")
   {
     referDutycycle = messageTemp.toInt();
   }
 
-  if (String(topic) == "chilly/output/refrigerator/settemp")
+  if (String(topic) == "chilly/output/refrigerator/setTemp")
   {
     referSetpointF = messageTemp.toInt();
     EEPROM.write(0, referSetpointF >> 8);   //(address, value(byte))
@@ -744,12 +784,12 @@ void callback(char *topic, byte *message, unsigned int length)
     EEPROM.commit();
   }
 
-  if (String(topic) == "chilly/output/freezer/setdutycycle")
+  if (String(topic) == "chilly/output/freezer/setDutyCycle")
   {
     freezerDutycycle = messageTemp.toInt();
   }
 
-  if (String(topic) == "chilly/output/freezer/settemp")
+  if (String(topic) == "chilly/output/freezer/setTemp")
   {
     //freezerSetpointF = messageTemp.toFloat();
     freezerSetpointF = messageTemp.toInt();
@@ -831,23 +871,27 @@ void setup()
   Serial.println("Booting");
 
   EEPROM.begin(EEPROM_SIZE);
-  referSetpointF = (EEPROM.read(0) << 8) + EEPROM.read(1);   //target to hold:  39?  ESP32 ONLY
-  freezerSetpointF = (EEPROM.read(2) << 8) + EEPROM.read(3); //target to hold:  39?  ESP32 ONLY
+  referSetpointF = (EEPROM.read(0) << 8) + EEPROM.read(1);    //target to hold:  39?  ESP32 ONLY
+  freezerSetpointF = (EEPROM.read(2) << 8) + EEPROM.read(3);  //target to hold:  39?  ESP32 ONLY
+  referFanbasespeed = (EEPROM.read(4) << 8) + EEPROM.read(5); //target to hold:  39?  ESP32 ONLY
 
   // configure PWM functionalitites
   ledcSetup(REFER_PWM_CHANNEL, PWM_FREQ_COMPRESSORS, PWM_RESOLUTION_0);
   ledcSetup(FREEZER_PWM_CHANNEL, PWM_FREQ_COMPRESSORS, PWM_RESOLUTION_0);
   ledcSetup(REFER_FAN_PWM_CHANNEL, PWM_FREQ_FAN, PWM_RESOLUTION_0);
+  ledcSetup(COMPRESSOR_BOX_FAN_PWM_CHANNEL, PWM_FREQ_FAN, PWM_RESOLUTION_0);
 
   // attach the channel to the GPIO to be controlled
   ledcAttachPin(REFER_PIN, REFER_PWM_CHANNEL);
   ledcAttachPin(FREEZER_PIN, FREEZER_PWM_CHANNEL);
   ledcAttachPin(REFER_FAN_PIN, REFER_FAN_PWM_CHANNEL);
+  ledcAttachPin(COMPRESSOR_BOX_FAN_PIN, COMPRESSOR_BOX_FAN_PWM_CHANNEL);
 
   //Initialize as zero or set value if on.
   ledcWrite(REFER_PWM_CHANNEL, 0);
   ledcWrite(FREEZER_PWM_CHANNEL, 0);
   ledcWrite(REFER_FAN_PWM_CHANNEL, 0);
+  ledcWrite(COMPRESSOR_BOX_FAN_PWM_CHANNEL, 0);
 
   //initialize duty cycle arrays
   memset(referDutycyclearray, 0, sizeof(referDutycyclearray));
@@ -989,7 +1033,8 @@ void loop()
 
   ledcWrite(REFER_PWM_CHANNEL, referCvalue);
   ledcWrite(FREEZER_PWM_CHANNEL, freezerCvalue);
-  ledcWrite(REFER_FAN_PWM_CHANNEL, 255 - referFanspeed); //set fan speed.  Inverted as ran through transistor
+  ledcWrite(REFER_FAN_PWM_CHANNEL, 255 - referFanspeed);                  //set fan speed.  Inverted as ran through transistor
+  ledcWrite(COMPRESSOR_BOX_FAN_PWM_CHANNEL, 255 - compressorBoxfanspeed); //set fan speed.  Inverted as ran through transistor
 
   //end cooling logic
 
