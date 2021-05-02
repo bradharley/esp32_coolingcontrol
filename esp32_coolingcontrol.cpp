@@ -48,7 +48,7 @@
 const char *HOSTNAME = "chilly"; // change according your setup : it is used in OTA and as MQTT identifier
 const char *WiFi_SSID = "SVPerspective";
 const char *WiFi_PW = "8187314277";
-const char *VERSION = "{\"Version\":\"0.51\"}";
+const char *VERSION = "{\"Version\":\"0.52\"}";
 const char *STATUS_MSG = "{\"Message\":\"Refrigeration Controller\"}";
 
 uint8_t conn_stat = 0; // Connection status for WiFi and MQTT:
@@ -122,7 +122,7 @@ unsigned long lastCeilingAdjustment = 0;                 //for adjustceiling fun
 int referMode = 0; // 0 auto, 1 manual for fan, dutycycle and compressor speed, 8 defrost, 9 off
 float boxTemperatureF;
 float compressorBoxTemperatureF;
-int compressorBoxfanspeed = 128; //default 128.  Play with noise and temp.  255 is OFF, 0 min spin
+int compressorBoxfanspeed = 248; //default 248.  128 is quiet.  Play with noise and temp.  255 is OFF, 0 min spin
 
 float referTemperatureF;
 float referTemperatureTestF;    //mobile temperature probe.
