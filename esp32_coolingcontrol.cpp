@@ -1,25 +1,4 @@
 /*
-   BasicOTA_PWM_1W_mqtt_v1 --get everything working
-   BasicOTA_PWM_1W_mqtt_v2 --work on surviving no network.
-   BasicOTA_PWM_1W_mqtt_v3 --functional as-is.
-        --todo:test with network going up and down.  Suspect need to modify to rejoin...
-          look at power consumption if were to turn off the wifi when not needed.   Get beacon
-          timing from router, and measure if/when wired into boat
-   BasicOTA_PWM_1W_mqtt_v4--start playing with sleep
-   referdev_v1 -- merge in cooling control logic and add freezer logic
-   referdev_v2 -- working on boat
-   referdev_v3 -- cleanup and work on network stuff
-   referdev_v4 -- cleanup mqtt stuff
-   referdev_v5 -- add tcp socket for debug logging
-   referdev_v6 -- merge and fork for devkit-c esp32.   old was hiletgo
-   referdev_v7 -- devkit-c esp32
-      --moving to git and platformio, including reformat to cpp.   Assess doing defines.
-      --Renaming file and moving to git version control
-   .5+ moving to git version control.
-
-
-
-
   GPIO mapping
 
   33: 1 wire
@@ -129,7 +108,8 @@ float referTemperatureTestF;    //mobile temperature probe.
 int referSetpointF;             // = 39; // This loads from EEPROM. //target to hold:  39?  ESP32 ONLY
 float referSetpointoffsetF = 5; //temperature at which full cooling kicks in
 const int referCfloor = 92;     // 92 is approximately full speed....3500rpm
-int referCceiling = 255;
+int referCceiling = 255;    //current ceiling(min speed) which is adjusted based on duty cycle
+int referCminspeed = 200;    //min speed which is fixed (set by mqqt in future?)
 int referCvalue = 0; //Pin value, 0 off 92 full speed ~2ma 255 low speed ~5ma
 int referCspeed = 0; //approximate RPM  //should probably eliminate and just calculate.
 int referFanspeed = 0;
@@ -138,8 +118,9 @@ int referFanbasespeed = 92; //92 works fine.   set base speed vi mqtt
 float freezerTemperatureF;
 int freezerSetpointF;             // = 0; //This loads from EEPROM //target to hold:  0?   ESP32 ONLY
 float freezerSetpointoffsetF = 5; //temperature at which full cooling kicks in
-const int freezerCfloor = 92;     // 92 is approximately full speed....3500rpm
-int freezerCceiling = 255;
+const int freezerCfloor = 92;     // 92 is approximately full speed....3500rpm  fixed
+int freezerCceiling = 255;  //current ceiling(min speed) which is adjusted based on duty cycle
+int freezerCminspeed = 200;    //min speed which is fixed (set by mqqt in future?)
 int freezerCvalue = 0; //Pin value
 int freezerCspeed = 0; //approximate RPM
 int freezerFanspeed = 0;
@@ -243,8 +224,8 @@ void getTemps()
   // by using either oneWire.search(deviceAddress) or individually via
   // sensors.getAddress(deviceAddress, index)
   DeviceAddress boxThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};
-  DeviceAddress referThermometer = {0x28, 0xDD, 0x64, 0x1F, 0x2F, 0x14, 0x01, 0x7E};
-  DeviceAddress referThermometerTest = {0x28, 0x71, 0xFF, 0x06, 0x2F, 0x14, 0x01, 0x33};     //currently lingering middle Stbd of fridge
+  DeviceAddress referThermometerTest = {0x28, 0xDD, 0x64, 0x1F, 0x2F, 0x14, 0x01, 0x7E};  //mounted port side box lower mid
+  DeviceAddress referThermometer = {0x28, 0x71, 0xFF, 0x06, 0x2F, 0x14, 0x01, 0x33};     //currently lingering middle Stbd of fridge
   DeviceAddress freezerThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};       //replace
   DeviceAddress freezerThermometerTest = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};   //replace
   DeviceAddress compressorBoxThermometer = {0x28, 0x81, 0xC1, 0x26, 0x2F, 0x14, 0x01, 0x17}; //near compressors
@@ -512,7 +493,7 @@ void adjustCeiling()
 
   if (referDutycycle <= maxDutycycle)
   {
-    if (referCceiling <= 255 - 55)
+    if (referCceiling <= referCminspeed - 55)
     {
       referCceiling += 55; //lower min RPM due to duty cycle  Case under duty cycle celieng <= 200, add 55 to ceiling on and off
       // Serial.print("Slowing compressor, under duty cycle limit");
@@ -523,7 +504,7 @@ void adjustCeiling()
     }
     else
     { //case under duty cycle, ceiling >200
-      referCceiling = 255;
+      referCceiling = referCminspeed;
     }
   }
   else
@@ -548,7 +529,7 @@ void adjustCeiling()
   //freezer section
   if (freezerDutycycle <= maxDutycycle)
   {
-    if (freezerCceiling <= 255 - 55)
+    if (freezerCceiling <= freezerCminspeed - 55)
     {
       freezerCceiling += 55; //lower min RPM due to duty cycle  Case under duty cycle celieng <= 200, add 55 to ceiling on and off
       // Serial.print("Slowing compressor, under duty cycle limit");
@@ -559,7 +540,7 @@ void adjustCeiling()
     }
     else
     { //case under duty cycle, ceiling >200
-      freezerCceiling = 255;
+      freezerCceiling = freezerCminspeed;
     }
   }
   else
