@@ -109,7 +109,7 @@ int referSetpointF;             // = 39; // This loads from EEPROM. //target to 
 float referSetpointoffsetF = 5; //temperature at which full cooling kicks in
 const int referCfloor = 92;     // 92 is approximately full speed....3500rpm
 int referCceiling = 255;    //current ceiling(min speed) which is adjusted based on duty cycle
-int referCminspeed = 200;    //min speed which is fixed (set by mqqt in future?)
+int referCminspeed = 200;    //min speed which is fixed (set by mqqt in future?)  200 is 2500rpm
 int referCvalue = 0; //Pin value, 0 off 92 full speed ~2ma 255 low speed ~5ma
 int referCspeed = 0; //approximate RPM  //should probably eliminate and just calculate.
 int referFanspeed = 0;
@@ -224,8 +224,8 @@ void getTemps()
   // by using either oneWire.search(deviceAddress) or individually via
   // sensors.getAddress(deviceAddress, index)
   DeviceAddress boxThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};
-  DeviceAddress referThermometerTest = {0x28, 0xDD, 0x64, 0x1F, 0x2F, 0x14, 0x01, 0x7E};  //mounted port side box lower mid
-  DeviceAddress referThermometer = {0x28, 0x71, 0xFF, 0x06, 0x2F, 0x14, 0x01, 0x33};     //currently lingering middle Stbd of fridge
+  DeviceAddress referThermometer = {0x28, 0xDD, 0x64, 0x1F, 0x2F, 0x14, 0x01, 0x7E};  //mounted port side box lower mid
+  DeviceAddress referThermometerTest = {0x28, 0x71, 0xFF, 0x06, 0x2F, 0x14, 0x01, 0x33};     //currently lingering middle Stbd of fridge
   DeviceAddress freezerThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};       //replace
   DeviceAddress freezerThermometerTest = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};   //replace
   DeviceAddress compressorBoxThermometer = {0x28, 0x81, 0xC1, 0x26, 0x2F, 0x14, 0x01, 0x17}; //near compressors
@@ -234,7 +234,7 @@ void getTemps()
   tcpClient.println(": entering getTemps()");
 
   sensors.requestTemperatures();
-  delay(10); //give a little time to return.  Does not appear to help??
+  // delay(10); //give a little time to return.  Does not appear to help??
 
   //temperatureC = sensors.getTempCByIndex(0);
   float temp = sensors.getTempF(compressorBoxThermometer);
@@ -356,10 +356,10 @@ void coolingControl()
 { //<------------------------------------------------------COOLING CONTROL
   tcpClient.print(millis());
   tcpClient.println(": entering cooling control");
-  //refrigerator section
+  //refrigerator section  Swap referTemperatureF with referTemperatureTestF for 3 below instances
   if (referMode == 0)
   {
-    if (referTemperatureF > referSetpointF + .25 && referCvalue == 0)
+    if (referTemperatureTestF > referSetpointF + .25 && referCvalue == 0)  //swapped probe
     {
       referCvalue = 255; //turn on and set back to lowest value to protect against high startup pressure
       //referCvalue = referCceiling; //turn on and set back to lowest based on duty cycle speed -previous logic-
@@ -370,7 +370,7 @@ void coolingControl()
     {
       if (referCvalue != 0)
       { //Compressor is ON for remaining function.
-        if (referTemperatureF > referSetpointF + referSetpointoffsetF)
+        if (referTemperatureTestF > referSetpointF + referSetpointoffsetF)  //swapped probe
         { //too hot, full cooling
           referCvalue = referCfloor;
           referCceiling = referCfloor;
@@ -385,7 +385,7 @@ void coolingControl()
           referFanspeed = referFanbasespeed; //hold at base speed, default 96 changeable
         }
 
-        if (referTemperatureF <= referSetpointF - cutoffOffsetF && referCvalue != 0)
+        if (referTemperatureTestF <= referSetpointF - cutoffOffsetF && referCvalue != 0)  //swapped probe
         {
           // Serial.print ("at or below cutoff, turning off compressor \n");
           referCvalue = 0;
@@ -966,12 +966,13 @@ void setup()
   Serial.println("Ready for OTA");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
+  networkcheck();  //set initial status.
 }
 
 void loop()
 {
   // start of non-blocking connection setup section
-  networkcheck();
+  // networkcheck();  no reason to continually check and improves performance.  Move to sensor interval which is where the check is valid....
 
   //conn_stat = 5; //debug with above
   // start section with tasks where WiFi/MQTT is required
@@ -989,7 +990,13 @@ void loop()
     //ArduinoOTA.handle();                                            // internal household function for OTA
     client.loop(); // internal household function for MQTT
     handleTCP();
+    networkcheck();
   }
+  else
+  {
+    networkcheck(); 
+  }
+  
   // end of section for tasks where WiFi/MQTT are required
 
   // Start cooling logic
