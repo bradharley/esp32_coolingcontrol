@@ -357,9 +357,21 @@ void coolingControl()
   tcpClient.print(millis());
   tcpClient.println(": entering cooling control");
   //refrigerator section  Swap referTemperatureF with referTemperatureTestF for 3 below instances
+  
+  //Use lowest temperature probe as reference
+  float referTemperatureLowestF =  referTemperatureTestF; //lowest of two
+  if (referTemperatureTestF < referTemperatureF )
+  { 
+    referTemperatureLowestF = referTemperatureTestF;
+  }
+  else
+  {
+    referTemperatureLowestF = referTemperatureF;
+  }
+  //end refereTemperatureLowestF reference
   if (referMode == 0)
   {
-    if (referTemperatureTestF > referSetpointF + .25 && referCvalue == 0)  //swapped probe
+    if (referTemperatureLowestF > referSetpointF + .25 && referCvalue == 0)  //swapped probe
     {
       referCvalue = 255; //turn on and set back to lowest value to protect against high startup pressure
       //referCvalue = referCceiling; //turn on and set back to lowest based on duty cycle speed -previous logic-
@@ -370,7 +382,7 @@ void coolingControl()
     {
       if (referCvalue != 0)
       { //Compressor is ON for remaining function.
-        if (referTemperatureTestF > referSetpointF + referSetpointoffsetF)  //swapped probe
+        if (referTemperatureLowestF > referSetpointF + referSetpointoffsetF)  //swapped probe
         { //too hot, full cooling
           referCvalue = referCfloor;
           referCceiling = referCfloor;
@@ -385,7 +397,7 @@ void coolingControl()
           referFanspeed = referFanbasespeed; //hold at base speed, default 96 changeable
         }
 
-        if (referTemperatureTestF <= referSetpointF - cutoffOffsetF && referCvalue != 0)  //swapped probe
+        if (referTemperatureLowestF <= referSetpointF - cutoffOffsetF && referCvalue != 0)  //swapped probe
         {
           // Serial.print ("at or below cutoff, turning off compressor \n");
           referCvalue = 0;
@@ -405,6 +417,8 @@ void coolingControl()
     referCvalue = 0;
     referFanspeed = 0;
   }
+
+//add in lowest temp sensor logic and mimic refer.   Old code below
 
   //Freezer Section
   if (freezerTemperatureF > freezerSetpointF + .5 && freezerCvalue == 0)
@@ -876,13 +890,13 @@ void setup()
 
   //initialize duty cycle arrays
   memset(referDutycyclearray, 0, sizeof(referDutycyclearray));
-  for (int i = 0; i < sizeof(referDutycyclearray) / sizeof(referDutycyclearray[0]); i += 2)
-  { //   Should be 50% as initialized.
+  for (int i = 0; i < sizeof(referDutycyclearray) / sizeof(referDutycyclearray[0]); i += 3)
+  { //   Should be 33% as initialized.
     referDutycyclearray[i] = 1;
   }
   memset(freezerDutycyclearray, 0, sizeof(freezerDutycyclearray));
-  for (int i = 0; i < sizeof(freezerDutycyclearray) / sizeof(freezerDutycyclearray[0]); i += 2)
-  { //   Should be 50% as initialized.
+  for (int i = 0; i < sizeof(freezerDutycyclearray) / sizeof(freezerDutycyclearray[0]); i += 3)
+  { //   Should be 33% as initialized.
     freezerDutycyclearray[i] = 1;
   }
   calcDutycycle(); //define initial variables
