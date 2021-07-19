@@ -99,12 +99,12 @@ unsigned long lastCeilingAdjustment = 0;                 //for adjustceiling fun
 
 //Start Cooling Variables
 int referMode = 0; // 0 auto, 1 manual for fan, dutycycle and compressor speed, 8 defrost, 9 off
-float boxTemperatureF;
+float boxTemperatureF;  //inside esp32 box
 float compressorBoxTemperatureF;
 int compressorBoxfanspeed = 248; //default 248.  128 is quiet.  Play with noise and temp.  255 is OFF, 0 min spin
 
-float referTemperatureF;
-float referTemperatureTestF;    //mobile temperature probe.
+float referTemperatureF;    //probe on evaporator
+float referTemperatureTestF;    //probe in fan chamber
 int referSetpointF;             // = 39; // This loads from EEPROM. //target to hold:  39?  ESP32 ONLY
 float referSetpointoffsetF = 5; //temperature at which full cooling kicks in
 const int referCfloor = 92;     // 92 is approximately full speed....3500rpm
@@ -168,7 +168,7 @@ void publishmqtt()
   dtostrf(referTemperatureTestK, 1, 2, tempString); //from float to char array
   client.publish("chilly/refrigerator/temperature_testK", tempString);
 
-  itoa(referCvalue, tempString, 10); //from integet to char array
+  itoa(referCvalue, tempString, 10); //from integer to char array
   client.publish("chilly/refrigerator/compressorPinValue", tempString);
 
   itoa(referCspeed, tempString, 10); //from integet to char array
@@ -755,6 +755,10 @@ void callback(char *topic, byte *message, unsigned int length)
   if (String(topic) == "chilly/output/refrigerator/setFanSpeed")
   {
     referFanspeed = messageTemp.toInt();
+    if (referFanspeed > 248)
+    {
+      referFanspeed = 248;
+    }
     ledcWrite(REFER_FAN_PWM_CHANNEL, 255 - referFanspeed);
   }
 
@@ -882,11 +886,11 @@ void setup()
   ledcAttachPin(REFER_FAN_PIN, REFER_FAN_PWM_CHANNEL);
   ledcAttachPin(COMPRESSOR_BOX_FAN_PIN, COMPRESSOR_BOX_FAN_PWM_CHANNEL);
 
-  //Initialize as zero or set value if on.
-  ledcWrite(REFER_PWM_CHANNEL, 0);
-  ledcWrite(FREEZER_PWM_CHANNEL, 0);
-  ledcWrite(REFER_FAN_PWM_CHANNEL, 0);
-  ledcWrite(COMPRESSOR_BOX_FAN_PWM_CHANNEL, 0);
+  //Initialize as zero(255 as transistor in place) or set value if on.
+  ledcWrite(REFER_PWM_CHANNEL, 255);
+  ledcWrite(FREEZER_PWM_CHANNEL, 255);
+  ledcWrite(REFER_FAN_PWM_CHANNEL, 255);
+  ledcWrite(COMPRESSOR_BOX_FAN_PWM_CHANNEL, 255);
 
   //initialize duty cycle arrays
   memset(referDutycyclearray, 0, sizeof(referDutycyclearray));
@@ -1032,7 +1036,15 @@ void loop()
     getTemps();
     lastSensorReading = millis(); //run when not connected to network
   }
-
+  //below reformatting needed as 255 actually turns of as transistor inverts
+  if (referFanspeed > 248)
+    {
+      referFanspeed = 248;
+    }
+  if (compressorBoxfanspeed > 248)
+    {
+      compressorBoxfanspeed = 248;
+    }
   ledcWrite(REFER_PWM_CHANNEL, referCvalue);
   ledcWrite(FREEZER_PWM_CHANNEL, freezerCvalue);
   ledcWrite(REFER_FAN_PWM_CHANNEL, 255 - referFanspeed);                  //set fan speed.  Inverted as ran through transistor
