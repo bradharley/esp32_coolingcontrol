@@ -98,31 +98,33 @@ unsigned long lastCoolingAdjustment = 0;                 //coolingPeriod * 1000U
 unsigned long lastCeilingAdjustment = 0;                 //for adjustceiling function--duty cycle calculation.
 
 //Start Cooling Variables
-int referMode = 0; // 0 auto, 1 manual for fan, dutycycle and compressor speed, 8 defrost, 9 off
-float boxTemperatureF;  //inside esp32 box
+int referMode = 0;     // 0 auto, 1 manual , dutycycle and compressor speed, 8 defrost, 9 off
+float boxTemperatureF; //inside esp32 box
 float compressorBoxTemperatureF;
 int compressorBoxfanspeed = 248; //default 248.  128 is quiet.  Play with noise and temp.  255 is OFF, 0 min spin
 
-float referTemperatureF;    //probe on evaporator
-float referTemperatureTestF;    //probe in fan chamber
-int referSetpointF;             // = 39; // This loads from EEPROM. //target to hold:  39?  ESP32 ONLY
-float referSetpointoffsetF = 5; //temperature at which full cooling kicks in
-const int referCfloor = 92;     // 92 is approximately full speed....3500rpm
-int referCceiling = 255;    //current ceiling(min speed) which is adjusted based on duty cycle
-int referCminspeed = 200;    //min speed which is fixed (set by mqqt in future?)  200 is 2500rpm
-int referCvalue = 0; //Pin value, 0 off 92 full speed ~2ma 255 low speed ~5ma
-int referCspeed = 0; //approximate RPM  //should probably eliminate and just calculate.
+float referTemperatureEvapF;           //probe on evaporator
+int evapUpperDiff = 14;                //evaporator temperature differential below setpoint.  Setpoint 40, evap cycles between 20-30 degrees.
+int evapLowerDiff = evapUpperDiff + 5; //tune for a 10 degree swing. Maybe clean up some day...
+float referTemperatureAirF;            //probe in fan chamber
+int referSetpointF;                    // = 39; // This loads from EEPROM. //target to hold:  39?  ESP32 ONLY
+float referSetpointoffsetF = 3;        //temperature at which full cooling kicks in
+const int referCfloor = 92;            // 92 is approximately full speed....3500rpm
+int referCminspeed = 200;              //min speed which is fixed (set by mqqt in future?)  200 is 2500rpm
+int referCceiling = referCminspeed;    //current ceiling(min speed) which is adjusted based on duty cycle
+int referCvalue = 0;                   //Pin value, 0 off 92 full speed ~2ma 255 low speed ~5ma
+int referCspeed = 0;                   //approximate RPM  //should probably eliminate and just calculate.
 int referFanspeed = 0;
-int referFanbasespeed = 92; //92 works fine.   set base speed vi mqtt
+int referFanbasespeed; //set base speed vi mqtt and stored in eeprom
 
 float freezerTemperatureF;
 int freezerSetpointF;             // = 0; //This loads from EEPROM //target to hold:  0?   ESP32 ONLY
 float freezerSetpointoffsetF = 5; //temperature at which full cooling kicks in
 const int freezerCfloor = 92;     // 92 is approximately full speed....3500rpm  fixed
-int freezerCceiling = 255;  //current ceiling(min speed) which is adjusted based on duty cycle
-int freezerCminspeed = 200;    //min speed which is fixed (set by mqqt in future?)
-int freezerCvalue = 0; //Pin value
-int freezerCspeed = 0; //approximate RPM
+int freezerCceiling = 255;        //current ceiling(min speed) which is adjusted based on duty cycle
+int freezerCminspeed = 200;       //min speed which is fixed (set by mqqt in future?)
+int freezerCvalue = 0;            //Pin value
+int freezerCspeed = 0;            //approximate RPM
 int freezerFanspeed = 0;
 
 float cutoffOffsetF = 0; //offset where compressors shutoff below setPointF
@@ -134,7 +136,7 @@ int referDutycycle;                                   // Should match the initia
 bool freezerDutycyclearray[2 * 3600 / coolingPeriod]; // one value per minute for n hrs as above
 int freezerDutycycleindex = 0;                        //should be same as refer.  No reason for duplicate
 int freezerDutycycle;                                 // Should match the initialization in setup()
-const int maxDutycycle = 50;                          //initialized as 50
+const int maxDutycycle = 60;                          //initialized as 60
 //End cooling variables
 
 //pre define functions
@@ -143,8 +145,8 @@ void calcDutycycle();
 
 void publishmqtt()
 {
-  tcpClient.print(millis());
-  tcpClient.println(": entering publishmqtt()");
+  //tcpClient.print(millis());
+  //tcpClient.println(": entering publishmqtt()");
 
   // Convert the value to a char array
   char tempString[8];
@@ -154,17 +156,17 @@ void publishmqtt()
   dtostrf(boxTemperatureF, 1, 2, tempString); //from float to char array
   client.publish("chilly/temperatureF", tempString);
 
-  dtostrf(referTemperatureF, 1, 2, tempString); //from float to char array
+  dtostrf(referTemperatureAirF, 1, 2, tempString); //from float to char array
   client.publish("chilly/refrigerator/temperatureF", tempString);
 
-  float referTemperatureK = (referTemperatureF - 32) * 5 / 9 + 273.15;
+  float referTemperatureK = (referTemperatureAirF - 32) * 5 / 9 + 273.15;
   dtostrf(referTemperatureK, 1, 2, tempString); //from float to char array
   client.publish("chilly/refrigerator/temperatureK", tempString);
 
-  dtostrf(referTemperatureTestF, 1, 2, tempString); //from float to char array
+  dtostrf(referTemperatureEvapF, 1, 2, tempString); //from float to char array
   client.publish("chilly/refrigerator/temperature_testF", tempString);
 
-  float referTemperatureTestK = (referTemperatureTestF - 32) * 5 / 9 + 273.15;
+  float referTemperatureTestK = (referTemperatureEvapF - 32) * 5 / 9 + 273.15;
   dtostrf(referTemperatureTestK, 1, 2, tempString); //from float to char array
   client.publish("chilly/refrigerator/temperature_testK", tempString);
 
@@ -202,18 +204,18 @@ void publishmqtt()
   dtostrf(freezerTemperatureK, 1, 2, tempString); //from float to char array
   client.publish("chilly/freezer/temperatureK", tempString);
 
-  itoa(freezerCvalue, tempString, 10); //from integet to char array
+  itoa(freezerCvalue, tempString, 10); //from integer to char array
   client.publish("chilly/freezer/compressorPinValue", tempString);
 
-  itoa(freezerCspeed, tempString, 10); //from integet to char array
+  itoa(freezerCspeed, tempString, 10); //from integer to char array
   client.publish("chilly/freezer/compressor_speed", tempString);
 
-  itoa(freezerDutycycle, tempString, 10); //from integet to char array
+  itoa(freezerDutycycle, tempString, 10); //from integer to char array
   client.publish("chilly/freezer/dutycycle", tempString);
 
   itoa(freezerSetpointF, tempString, 10); //from float to char array
   client.publish("chilly/freezer/setPointF", tempString);
-  //client.publish("chilly/referTemperatureF", tempString,true); //last true signifies retained message
+  //client.publish("chilly/referTemperatureEvapF", tempString,true); //last true signifies retained message
 }
 
 void getTemps()
@@ -224,14 +226,14 @@ void getTemps()
   // by using either oneWire.search(deviceAddress) or individually via
   // sensors.getAddress(deviceAddress, index)
   DeviceAddress boxThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};
-  DeviceAddress referThermometer = {0x28, 0xDD, 0x64, 0x1F, 0x2F, 0x14, 0x01, 0x7E};  //mounted port side box lower mid
-  DeviceAddress referThermometerTest = {0x28, 0x71, 0xFF, 0x06, 0x2F, 0x14, 0x01, 0x33};     //currently lingering middle Stbd of fridge
-  DeviceAddress freezerThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};       //replace
-  DeviceAddress freezerThermometerTest = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};   //replace
+  DeviceAddress referThermometerEvap = {0x28, 0xDD, 0x64, 0x1F, 0x2F, 0x14, 0x01, 0x7E};     //mounted port side box lower mid
+  DeviceAddress referThermometerAir = {0x28, 0x71, 0xFF, 0x06, 0x2F, 0x14, 0x01, 0x33};      //currently lingering middle Stbd of fridge
+  //DeviceAddress freezerThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};       //replace
+  //DeviceAddress freezerThermometerTest = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};   //replace
   DeviceAddress compressorBoxThermometer = {0x28, 0x81, 0xC1, 0x26, 0x2F, 0x14, 0x01, 0x17}; //near compressors
 
-  tcpClient.print(millis());
-  tcpClient.println(": entering getTemps()");
+  //tcpClient.print(millis());
+  //tcpClient.println(": entering getTemps()");
 
   sensors.requestTemperatures();
   // delay(10); //give a little time to return.  Does not appear to help??
@@ -263,7 +265,7 @@ void getTemps()
     Serial.println(boxTemperatureF);
   }
 
-  temp = sensors.getTempF(referThermometer);
+  temp = sensors.getTempF(referThermometerEvap);
 
   if (temp > 180 || temp < 10)
   { // range -55 to 125 C.  retry.   Getting -127C/196.60F and sometimes zero, apparent timing after "sensors.requestTemperatures()"
@@ -272,11 +274,11 @@ void getTemps()
   }
   else
   {
-    referTemperatureF = temp;
-    Serial.println(referTemperatureF);
+    referTemperatureEvapF = temp;
+    Serial.println(referTemperatureEvapF);
   }
 
-  temp = sensors.getTempF(referThermometerTest);
+  temp = sensors.getTempF(referThermometerAir);
 
   if (temp > 180 || temp < 10)
   { // range -55 to 125 C.  retry.   Getting -127C/196.60F and sometimes zero, apparent timing after "sensors.requestTemperatures()"
@@ -285,11 +287,11 @@ void getTemps()
   }
   else
   {
-    referTemperatureTestF = temp;
-    Serial.println(referTemperatureTestF);
+    referTemperatureAirF = temp;
+    Serial.println(referTemperatureAirF);
   }
 
-  temp = sensors.getTempF(referThermometer); ////change to freezer
+  temp = sensors.getTempF(referThermometerEvap); ////change to freezer
 
   if (temp > 180 || temp < 1)
   { // range -55 to 125 C.  retry.   Getting -127C/196.60F, apparent timing after "sensors.requestTemperatures()"
@@ -352,56 +354,86 @@ uint8_t findDevices(int pin)
   return count;
 }
 
-void coolingControl()
-{ //<------------------------------------------------------COOLING CONTROL
+void coolingControl2()
+{ //<------------------------------------------------------COOLING CONTROL2
   tcpClient.print(millis());
-  tcpClient.println(": entering cooling control");
-  //refrigerator section  Swap referTemperatureF with referTemperatureTestF for 3 below instances
-  
-  //Use lowest temperature probe as reference
-  float referTemperatureLowestF =  referTemperatureTestF; //lowest of two
-  if (referTemperatureTestF < referTemperatureF )
-  { 
-    referTemperatureLowestF = referTemperatureTestF;
-  }
-  else
+  tcpClient.println(": entering cooling control2");
+
+  if (referMode == 0 || referMode == 1) //refermode auto or auto max
   {
-    referTemperatureLowestF = referTemperatureF;
-  }
-  //end refereTemperatureLowestF reference
-  if (referMode == 0)
-  {
-    if (referTemperatureLowestF > referSetpointF + .25 && referCvalue == 0)  //swapped probe
-    {
-      referCvalue = 255; //turn on and set back to lowest value to protect against high startup pressure
+    /*if (referTemperatureAirF < referSetpointF && referCvalue == 0 && referTemperatureEvapF >  referTemperatureAirF - evapUpperDiff ) 
+      //move definition to top
+      evapUpperDiff = evapUpperDiff + 2;  
+      evapLowerDiff = evapUpperDiff + 2;
+    } */
+
+    if (referCvalue == 0 && referTemperatureEvapF > referSetpointF - evapUpperDiff && referTemperatureAirF >= referSetpointF) //
+    {                                                                                                                         //turn on compressor logic based on evaporator/air temperature and keep from defrosting<--caution.
+      referCvalue = 255;                                                                                                      //turn on and set back to lowest value to protect against high startup pressure
       //referCvalue = referCceiling; //turn on and set back to lowest based on duty cycle speed -previous logic-
       // Serial.print ("turning on compressor \n");
+      tcpClient.print("Air Temperature: ");
+      tcpClient.print(referTemperatureAirF);
+      tcpClient.print(", Setpoint: ");
+      tcpClient.print(referSetpointF);
+      tcpClient.print(", UDiff: ");
+      tcpClient.println(evapUpperDiff);
+
+      tcpClient.println("turning on compressor");
       // referFanspeed = referFanbasespeed; //-cool 1 min before turning on fan.  Turn up the fan to default run speed.  96 ran fine , try 128 with smaller fan..   52 minimum?
+      if (referTemperatureAirF < referSetpointF)
+      {
+        evapUpperDiff = evapUpperDiff - 1; //if Starting below setpoint, raise the temperature band.
+        tcpClient.print("Below Setpoint: decreasing evap diff to: ");
+        tcpClient.println(evapUpperDiff);
+      }
     }
     else
     {
       if (referCvalue != 0)
-      { //Compressor is ON for remaining function.
-        if (referTemperatureLowestF > referSetpointF + referSetpointoffsetF)  //swapped probe
+      { //Compressor is ON for remaining block.
+        if (referTemperatureAirF > referSetpointF + referSetpointoffsetF)
         { //too hot, full cooling
           referCvalue = referCfloor;
           referCceiling = referCfloor;
           Serial.println("to hot!!!  full speed");
           client.publish("chilly/refrigerator/lastError", "refer too hot", true);
           tcpClient.println("to hot!!!  full speed");
-          referFanspeed = 255; //Turn up the fan to default max speed.
+          referFanspeed = 255;                 //Turn up the fan to default max speed.
+          evapUpperDiff = referSetpointF - 18; //set differential for max cooling.
+          evapLowerDiff = evapUpperDiff + 5;   // Lower Floor is set to 12 degrees.  Seems to be as low as it will go.
+          referMode = 1;  //set to max cooling
         }
         else
-        {
+        {                                    //not too hot, normal cooling
           referCvalue = referCceiling;       //set back to ceiling based on duty cycle.  Pair with initial slow startup above
           referFanspeed = referFanbasespeed; //hold at base speed, default 96 changeable
+          evapLowerDiff = evapUpperDiff + 5;
+          if(referMode == 1)
+          {
+            evapUpperDiff = 14;                //set back to defaults as close to setpoint.  Should match as defined.
+            referMode = 0;
+          }
         }
 
-        if (referTemperatureLowestF <= referSetpointF - cutoffOffsetF && referCvalue != 0)  //swapped probe
+        if (referTemperatureEvapF <= referSetpointF - evapLowerDiff || referTemperatureEvapF < 12)
         {
           // Serial.print ("at or below cutoff, turning off compressor \n");
+          tcpClient.print("Air Temperature: ");
+          tcpClient.print(referTemperatureAirF);
+          tcpClient.print(", Setpoint: ");
+          tcpClient.print(referSetpointF);
+          tcpClient.print(", UDiff: ");
+          tcpClient.println(evapUpperDiff);
+          tcpClient.println("at or below cutoff, turning off compressor");
           referCvalue = 0;
-          referFanspeed = 0; //52; //slow down the fan to off
+          referFanspeed = 52; //52; //slow down the fan to off
+          if (evapUpperDiff < referSetpointF - 18 && referTemperatureAirF > referSetpointF + .25)
+          {
+            evapUpperDiff = evapUpperDiff + 1; //if turn with evap at defrost point, raise the temperature band.
+            tcpClient.print("Above Setpoint: increasing evap diff to: ");
+            tcpClient.println(evapUpperDiff);
+          }
         }
       }
     }
@@ -418,7 +450,7 @@ void coolingControl()
     referFanspeed = 0;
   }
 
-//add in lowest temp sensor logic and mimic refer.   Old code below
+  //add in lowest temp sensor logic and mimic refer.   Old code below
 
   //Freezer Section
   if (freezerTemperatureF > freezerSetpointF + .5 && freezerCvalue == 0)
@@ -437,7 +469,7 @@ void coolingControl()
         freezerCceiling = freezerCfloor;
         Serial.print("freezer to hot!!!  full speed \n");
         client.publish("chilly/freezer/lastError", "freezer too hot", true);
-        freezerFanspeed = 255; //Turn up the fan to default run speed.
+        // freezerFanspeed = 255; //Turn up the fan to default run speed. //disable
       }
 
       if (freezerTemperatureF <= freezerSetpointF - cutoffOffsetF && freezerCvalue != 0)
@@ -501,8 +533,8 @@ void coolingControl()
 
 void adjustCeiling()
 { //do this every N minutes, default 5.
-  tcpClient.print(millis());
-  tcpClient.println(": entering adjustCeiling()");
+  //tcpClient.print(millis());
+  //tcpClient.println(": entering adjustCeiling()");
   //refer section
 
   if (referDutycycle <= maxDutycycle)
@@ -584,8 +616,8 @@ void adjustCeiling()
 void calcDutycycle()
 { //int for value returning function   Try passing the array to do it for freezer and refer.
   //calculate duty cycle for refer
-  tcpClient.print(millis());
-  tcpClient.println(": entering calcDutycycle()");
+  //tcpClient.print(millis());
+  //tcpClient.println(": entering calcDutycycle()");
   int index;
   int arraySum;
 
@@ -894,13 +926,13 @@ void setup()
 
   //initialize duty cycle arrays
   memset(referDutycyclearray, 0, sizeof(referDutycyclearray));
-  for (int i = 0; i < sizeof(referDutycyclearray) / sizeof(referDutycyclearray[0]); i += 3)
-  { //   Should be 33% as initialized.
+  for (int i = 0; i < sizeof(referDutycyclearray) / sizeof(referDutycyclearray[0]); i += 2)
+  { //   Should be 50% as initialized.
     referDutycyclearray[i] = 1;
   }
   memset(freezerDutycyclearray, 0, sizeof(freezerDutycyclearray));
-  for (int i = 0; i < sizeof(freezerDutycyclearray) / sizeof(freezerDutycyclearray[0]); i += 3)
-  { //   Should be 33% as initialized.
+  for (int i = 0; i < sizeof(freezerDutycyclearray) / sizeof(freezerDutycyclearray[0]); i += 2)
+  { //   Should be 50% as initialized.
     freezerDutycyclearray[i] = 1;
   }
   calcDutycycle(); //define initial variables
@@ -947,36 +979,38 @@ void setup()
   // ArduinoOTA.setPasswordHash("21232f297a57a5a743894a0e4a801fc3");
 
   ArduinoOTA
-      .onStart([]() {
-        String type;
-        if (ArduinoOTA.getCommand() == U_FLASH)
-          type = "sketch";
-        else // U_SPIFFS
-          type = "filesystem";
+      .onStart([]()
+               {
+                 String type;
+                 if (ArduinoOTA.getCommand() == U_FLASH)
+                   type = "sketch";
+                 else // U_SPIFFS
+                   type = "filesystem";
 
-        // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
-        Serial.println("Start updating " + type);
-      })
-      .onEnd([]() {
-        Serial.println("\nEnd");
-        ESP.restart(); //restart on upload
-      })
-      .onProgress([](unsigned int progress, unsigned int total) {
-        Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-      })
-      .onError([](ota_error_t error) {
-        Serial.printf("Error[%u]: ", error);
-        if (error == OTA_AUTH_ERROR)
-          Serial.println("Auth Failed");
-        else if (error == OTA_BEGIN_ERROR)
-          Serial.println("Begin Failed");
-        else if (error == OTA_CONNECT_ERROR)
-          Serial.println("Connect Failed");
-        else if (error == OTA_RECEIVE_ERROR)
-          Serial.println("Receive Failed");
-        else if (error == OTA_END_ERROR)
-          Serial.println("End Failed");
-      });
+                 // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+                 Serial.println("Start updating " + type);
+               })
+      .onEnd([]()
+             {
+               Serial.println("\nEnd");
+               ESP.restart(); //restart on upload
+             })
+      .onProgress([](unsigned int progress, unsigned int total)
+                  { Serial.printf("Progress: %u%%\r", (progress / (total / 100))); })
+      .onError([](ota_error_t error)
+               {
+                 Serial.printf("Error[%u]: ", error);
+                 if (error == OTA_AUTH_ERROR)
+                   Serial.println("Auth Failed");
+                 else if (error == OTA_BEGIN_ERROR)
+                   Serial.println("Begin Failed");
+                 else if (error == OTA_CONNECT_ERROR)
+                   Serial.println("Connect Failed");
+                 else if (error == OTA_RECEIVE_ERROR)
+                   Serial.println("Receive Failed");
+                 else if (error == OTA_END_ERROR)
+                   Serial.println("End Failed");
+               });
 
   ArduinoOTA.begin();
   // ARDUINOOTA STOP //
@@ -984,7 +1018,7 @@ void setup()
   Serial.println("Ready for OTA");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
-  networkcheck();  //set initial status.
+  networkcheck(); //set initial status.
 }
 
 void loop()
@@ -1012,16 +1046,19 @@ void loop()
   }
   else
   {
-    networkcheck(); 
+    networkcheck();
   }
-  
+
   // end of section for tasks where WiFi/MQTT are required
 
   // Start cooling logic
   if (millis() - lastCoolingAdjustment > coolingPeriod * 1000UL)
-  { //in seconds default 60
-    coolingControl();
-    calcDutycycle();
+  {                     //in seconds default 60
+    if (referMode != 1) //stop recalculating duty cycle and use manual setting
+    {
+      coolingControl2();
+      calcDutycycle();
+    }
     lastCoolingAdjustment = millis();
   }
 
@@ -1038,13 +1075,13 @@ void loop()
   }
   //below reformatting needed as 255 actually turns of as transistor inverts
   if (referFanspeed > 248)
-    {
-      referFanspeed = 248;
-    }
+  {
+    referFanspeed = 248;
+  }
   if (compressorBoxfanspeed > 248)
-    {
-      compressorBoxfanspeed = 248;
-    }
+  {
+    compressorBoxfanspeed = 248;
+  }
   ledcWrite(REFER_PWM_CHANNEL, referCvalue);
   ledcWrite(FREEZER_PWM_CHANNEL, freezerCvalue);
   ledcWrite(REFER_FAN_PWM_CHANNEL, 255 - referFanspeed);                  //set fan speed.  Inverted as ran through transistor
