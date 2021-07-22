@@ -98,7 +98,7 @@ unsigned long lastCoolingAdjustment = 0;                 //coolingPeriod * 1000U
 unsigned long lastCeilingAdjustment = 0;                 //for adjustceiling function--duty cycle calculation.
 
 //Start Cooling Variables
-int referMode = 0;     // 0 auto, 1 manual , dutycycle and compressor speed, 8 defrost, 9 off
+int referMode = 0;     // 0 auto, 1 auto max, 2 manual , dutycycle and compressor speed, 8 defrost, 9 off
 float boxTemperatureF; //inside esp32 box
 float compressorBoxTemperatureF;
 int compressorBoxfanspeed = 248; //default 248.  128 is quiet.  Play with noise and temp.  255 is OFF, 0 min spin
@@ -130,10 +130,10 @@ int freezerFanspeed = 0;
 float cutoffOffsetF = 0; //offset where compressors shutoff below setPointF
 
 //arrays below use lots of global memory....
-bool referDutycyclearray[2 * 3600 / coolingPeriod]; // one value per minute for X: 2 hours (7200) or 1 hr (3600)
+bool referDutycyclearray[1 * 3600 / coolingPeriod]; // one value per minute for X: 2 hours (7200) or 1 hr (3600)
 int referDutycycleindex = 0;
 int referDutycycle;                                   // Should match the initialization in setup()
-bool freezerDutycyclearray[2 * 3600 / coolingPeriod]; // one value per minute for n hrs as above
+bool freezerDutycyclearray[1 * 3600 / coolingPeriod]; // one value per minute for n hrs as above
 int freezerDutycycleindex = 0;                        //should be same as refer.  No reason for duplicate
 int freezerDutycycle;                                 // Should match the initialization in setup()
 const int maxDutycycle = 60;                          //initialized as 60
@@ -356,80 +356,75 @@ uint8_t findDevices(int pin)
 
 void coolingControl2()
 { //<------------------------------------------------------COOLING CONTROL2
+/*
+It appears that min temp at max rpm is 10.06 degrees for evap plate.  Due to sensor!
+Unsure Why...   But that's what I saw when running full steam.
+12degree shutoff seems to be a good safety net.
+*/
   tcpClient.print(millis());
-  tcpClient.println(": entering cooling control2");
-
-  if (referMode == 0 || referMode == 1) //refermode auto or auto max
-  {
-    if (referCvalue == 0 && referTemperatureEvapF > referSetpointF - evapUpperDiff && referTemperatureAirF >= referSetpointF) //
-    {                                                                                                    //turn on and set back to lowest value to protect against high startup pressure
-      // Serial.print ("turning on compressor \n");
-      tcpClient.print("Air Temperature: ");
-      tcpClient.print(referTemperatureAirF);
-      tcpClient.print(", Setpoint: ");
-      tcpClient.print(referSetpointF);
-      tcpClient.print(", UDiff: ");
-      tcpClient.println(evapUpperDiff);
-      tcpClient.println("turning on compressor");
-      referCvalue = 255;  //turn on slowest speed to avoid startup load
-      // referFanspeed = referFanbasespeed; //-cool 1 min before turning on fan.  Turn up the fan to default run speed.  96 ran fine , try 128 with smaller fan..   52 minimum?
-      if (referTemperatureAirF < referSetpointF)
-      {
-        evapUpperDiff = evapUpperDiff - 1; //if Starting below setpoint, raise the temperature band.
-        //alt test
-        //referCceiling = 255;  //alt test.   Should reduce speed while starting below setpoint 
-        tcpClient.print("Below Setpoint: decreasing evap diff to: ");
-        tcpClient.println(evapUpperDiff);
-      }
-    }
-    else
+  tcpClient.print(": entering cooling control2. ");
+  tcpClient.print("Air Temperature: ");
+  tcpClient.print(referTemperatureAirF);
+  tcpClient.print(", Setpoint: ");
+  tcpClient.print(referSetpointF);
+  tcpClient.print(", UDiff: ");
+  tcpClient.println(evapUpperDiff);
+  if (referCvalue == 0 && referTemperatureEvapF > referSetpointF - evapUpperDiff && referTemperatureAirF >= referSetpointF) //
+  {                                                                                                                         //turn on and set back to lowest value to protect against high startup pressure
+    // Serial.print ("turning on compressor \n");
+    tcpClient.println("turning on compressor");
+    referCvalue = 255; //turn on slowest speed to avoid startup load
+    // referFanspeed = referFanbasespeed; //-cool 1 min before turning on fan.  Turn up the fan to default run speed.  96 ran fine , try 128 with smaller fan..   52 minimum?
+    if (referTemperatureAirF < referSetpointF)
     {
-      if (referCvalue != 0)
-      { //Compressor is ON for remaining block.
-        if (referTemperatureAirF > referSetpointF + referSetpointoffsetF)
-        { //too hot, full cooling
-          referCvalue = referCfloor;
-          referCceiling = referCfloor;
-          Serial.println("to hot!!!  full speed");
-          client.publish("chilly/refrigerator/lastError", "refer too hot", true);
-          tcpClient.println("to hot!!!  full speed");
-          referFanspeed = 255;                 //Turn up the fan to default max speed.
-          evapUpperDiff = referSetpointF - 18; //set differential for max cooling.
-          evapLowerDiff = evapUpperDiff + 5;   // Lower Floor is set to 12 degrees.  Seems to be as low as it will go.
-          referMode = 1;                       //set to max cooling
-        }
-        else
-        {                                    //not too hot, normal cooling
-          referCvalue = referCceiling;       //set back to ceiling based on duty cycle.  Pair with initial slow startup above
-          referFanspeed = referFanbasespeed; //hold at base speed, default 96 changeable
-          evapLowerDiff = evapUpperDiff + 5;
-          if (referMode == 1)
-          {
-            evapUpperDiff = 18; //set back to defaults as close to setpoint.  Should match as defined.
-            referMode = 0;
-          }
-        }
-
-        if (referTemperatureEvapF <= referSetpointF - evapLowerDiff || referTemperatureEvapF < 12)
+      evapUpperDiff = evapUpperDiff - 1; //if Starting below setpoint, raise the temperature band.
+      //alt test
+      //referCceiling = 255;  //alt test.   Should reduce speed while starting below setpoint
+      tcpClient.print("Below Setpoint: decreasing evap diff to: ");
+      tcpClient.println(evapUpperDiff);
+    }
+  }
+  else
+  {
+    if (referCvalue != 0)
+    { //Compressor is ON for remaining block.
+      if (referTemperatureAirF > referSetpointF + referSetpointoffsetF)
+      { //too hot, full cooling
+        referCvalue = referCfloor;
+        referCceiling = referCfloor;
+        Serial.println("to hot!!!  full speed");
+        client.publish("chilly/refrigerator/lastError", "refer too hot", true);
+        tcpClient.println("to hot!!!  full speed");
+        referFanspeed = 255;                 //Turn up the fan to default max speed.
+        evapUpperDiff = referSetpointF - 15; //  18 default -set differential for max cooling
+        evapLowerDiff = evapUpperDiff + 5;   // Lower Floor is set to 12 degrees.  Seems to be as low as it will go.
+        referMode = 1;                       //set to max cooling
+      }
+      else
+      {                                    //not too hot, normal cooling
+        referCvalue = referCceiling;       //set back to ceiling based on duty cycle.  Pair with initial slow startup above
+        referFanspeed = referFanbasespeed; //hold at base speed, default 96 changeable
+        evapLowerDiff = evapUpperDiff + 5;
+        if (referMode == 1)
         {
-          // Serial.print ("at or below cutoff, turning off compressor \n");
-          tcpClient.print("Air Temperature: ");
-          tcpClient.print(referTemperatureAirF);
-          tcpClient.print(", Setpoint: ");
-          tcpClient.print(referSetpointF);
-          tcpClient.print(", UDiff: ");
+          evapUpperDiff = 18; //set back to defaults as close to setpoint.  Should match as defined.
+          referMode = 0;
+        }
+      }
+
+      if (referTemperatureEvapF <= referSetpointF - evapLowerDiff || referTemperatureEvapF < 11.0f) //12.0f default
+      {
+        // Serial.print ("at or below cutoff, turning off compressor \n");
+        tcpClient.println("at or below cutoff, turning off compressor");
+        referCvalue = 0;
+        referFanspeed = 52; //52; //slow down the fan to off
+        if (evapUpperDiff <= referSetpointF - 15 && referTemperatureAirF > referSetpointF + 1)
+        {
+          evapUpperDiff = evapUpperDiff + 1; //if turn with evap at defrost point, lower the temperature band.
+          //alt test
+          //referCceiling = 92;
+          tcpClient.print("Above Setpoint: increasing evap diff to: ");
           tcpClient.println(evapUpperDiff);
-          tcpClient.println("at or below cutoff, turning off compressor");
-          referCvalue = 0;
-          referFanspeed = 52; //52; //slow down the fan to off
-          if (evapUpperDiff < referSetpointF - 18 && referTemperatureAirF > referSetpointF + .25)
-          {
-            evapUpperDiff = evapUpperDiff + 1; //if turn with evap at defrost point, raise the temperature band.
-            //alt test
-            //referCceiling = 92;
-            tcpClient.print("Above Setpoint: increasing evap diff to: ");
-            tcpClient.println(evapUpperDiff);
-          }
         }
       }
     }
@@ -960,7 +955,7 @@ void setup()
 
   // Start the DS18B20 sensor
   sensors.begin();
-  sensors.setResolution(12);
+  sensors.setResolution(11);
   getTemps(); //initial pull of temperatures to ensure we have the data on first publish
 
   // ARDUINOOTA START //
@@ -1050,7 +1045,7 @@ void loop()
   // Start cooling logic
   if (millis() - lastCoolingAdjustment > coolingPeriod * 1000UL)
   {                     //in seconds default 60
-    if (referMode != 1) //stop recalculating duty cycle and use manual setting
+    if (referMode != 2) //stop recalculating duty cycle and use manual setting
     {
       coolingControl2();
       calcDutycycle();
