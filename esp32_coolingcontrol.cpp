@@ -110,7 +110,7 @@ float referTemperatureAirF;         //probe in fan chamber
 int referSetpointF;                 // = 39; // This loads from EEPROM. //target to hold:  39?  ESP32 ONLY
 float referSetpointoffsetF = 3;     //temperature at which full cooling kicks in
 const int referCfloor = 92;         // 92 is approximately full speed....3500rpm
-int referCminspeed = 200;           //min speed which is fixed mqtt? 200/2500 145/3000 92/3500rpm
+int referCminspeed = 255;           //min speed which is fixed mqtt? 255/2000 200/2500 145/3000 92/3500rpm
 int referCceiling = referCminspeed; //current ceiling(min speed) which is adjusted based on duty cycle
 int referCvalue = 0;                //Pin value, 0 off 92 full speed ~2ma 255 low speed ~5ma
 int referCspeed = 0;                //approximate RPM  //should probably eliminate and just calculate.
@@ -371,7 +371,7 @@ Unsure Why...   But that's what I saw when running full steam.
   tcpClient.println(evapUpperDiff);
   if (referMode == 0 || referMode == 1)
   {
-    if (referCvalue == 0 && referTemperatureEvapF > referSetpointF - evapUpperDiff) //&& referTemperatureAirF >= referSetpointF) //
+    if (referCvalue == 0 && referTemperatureEvapF > referSetpointF - evapUpperDiff && (referTemperatureAirF >= referSetpointF || referTemperatureEvapF > 31)) 
     {                                                                               //turn on and set back to lowest value to protect against high startup pressure
       // Serial.print ("turning on compressor \n");
       tcpClient.println("turning on compressor");
@@ -415,12 +415,12 @@ Unsure Why...   But that's what I saw when running full steam.
           }
         }
 
-        if (referTemperatureEvapF <= referSetpointF - evapLowerDiff || referTemperatureEvapF < 12.5f) //12.0f default
+        if ((referTemperatureEvapF <= referSetpointF - evapLowerDiff || referTemperatureEvapF < 12.5f) || (referTemperatureAirF <= referSetpointF - .15 && referTemperatureEvapF < 32 )) //12.0f default
         {
           // Serial.print ("at or below cutoff, turning off compressor \n");
           tcpClient.println("at or below cutoff, turning off compressor");
           referCvalue = 0;
-          referFanspeed = 64;                                                                //52; //slow down the fan to off
+          referFanspeed = 0;                                                                //52; //slow down the fan to off
           if (referSetpointF - evapUpperDiff >= 13 && referTemperatureAirF > referSetpointF) // upper > 18 degrees and temp above setpoint
           {
             evapUpperDiff = evapUpperDiff + 1; //if turn with evap at defrost point, lower the temperature band.
@@ -925,13 +925,13 @@ void setup()
 
   //initialize duty cycle arrays
   memset(referDutycyclearray, 0, sizeof(referDutycyclearray));
-  for (int i = 0; i < sizeof(referDutycyclearray) / sizeof(referDutycyclearray[0]); i += 2)
-  { //   Should be 50% as initialized.
+  for (int i = 0; i < sizeof(referDutycyclearray) / sizeof(referDutycyclearray[0]); i += 3)
+  { //   Should be 33% as initialized.
     referDutycyclearray[i] = 1;
   }
   memset(freezerDutycyclearray, 0, sizeof(freezerDutycyclearray));
-  for (int i = 0; i < sizeof(freezerDutycyclearray) / sizeof(freezerDutycyclearray[0]); i += 2)
-  { //   Should be 50% as initialized.
+  for (int i = 0; i < sizeof(freezerDutycyclearray) / sizeof(freezerDutycyclearray[0]); i += 3)
+  { //   Should be 33% as initialized.
     freezerDutycyclearray[i] = 1;
   }
   calcDutycycle(); //define initial variables
