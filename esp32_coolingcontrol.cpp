@@ -136,7 +136,7 @@ int referDutycycle;                                   // Should match the initia
 bool freezerDutycyclearray[1 * 3600 / coolingPeriod]; // one value per minute for n hrs as above
 int freezerDutycycleindex = 0;                        //should be same as refer.  No reason for duplicate
 int freezerDutycycle;                                 // Should match the initialization in setup()
-const int maxDutycycle = 55;                          //initialized as 60
+const int maxDutycycle = 65;                          //initialized as 65--WATCH***
 //End cooling variables
 
 //pre define functions
@@ -377,7 +377,7 @@ Unsure Why...   But that's what I saw when running full steam.
       tcpClient.println("turning on compressor");
       referCvalue = 255; //turn on slowest speed to avoid startup load
       // referFanspeed = referFanbasespeed; //-cool 1 min before turning on fan.  Turn up the fan to default run speed.  96 ran fine , try 128 with smaller fan..   52 minimum?
-      if (referTemperatureAirF < referSetpointF && referSetpointF - evapUpperDiff <= 30) //add second condition to stop defrost
+      if (referTemperatureAirF < referSetpointF )// && referSetpointF - evapUpperDiff <= 30) //add second condition to stop defrostXABOVE
       {
         evapUpperDiff = evapUpperDiff - 1; //if Starting below setpoint, raise the temperature band.
         evapLowerDiff = evapUpperDiff + 4;
@@ -398,7 +398,8 @@ Unsure Why...   But that's what I saw when running full steam.
           Serial.println("to hot!!!  full speed");
           client.publish("chilly/refrigerator/lastError", "refer too hot", true);
           tcpClient.println("to hot!!!  full speed");
-          referFanspeed = 255;                 //Turn up the fan to default max speed.
+          referFanspeed = referFanbasespeed; //hold at base speed, default 96 changeable
+          //referFanspeed = 255;                 //Turn up the fan to default max speed.
           evapUpperDiff = referSetpointF - 16; // test 16:44=28=16degree upper limit, 12 degree lower: 19 default 46 degree setpoing delivers about 40 degrees inside.  move sensor
           evapLowerDiff = evapUpperDiff + 4;   // Lower Floor is set to 12 degrees.  Seems to be as low as it will go.
           referMode = 1;                       //set to max cooling
@@ -415,13 +416,13 @@ Unsure Why...   But that's what I saw when running full steam.
           }
         }
 
-        if ((referTemperatureEvapF <= referSetpointF - evapLowerDiff || referTemperatureEvapF < 12.5f) || (referTemperatureAirF <= referSetpointF - .15 && referTemperatureEvapF < 32 )) //12.0f default
-        {
+        if ((referTemperatureEvapF <= referSetpointF - evapLowerDiff || referTemperatureEvapF < 9) || (referTemperatureAirF <= referSetpointF - .15 && referTemperatureEvapF < 32 )) //12.0f default
+        {  //<12.5 works fine.  lowering to 12.0, fine, 11.5, fine, 10--ok.   Drive down to 9 here and 5lines below
           // Serial.print ("at or below cutoff, turning off compressor \n");
           tcpClient.println("at or below cutoff, turning off compressor");
           referCvalue = 0;
           referFanspeed = 0;                                                                //52; //slow down the fan to off
-          if (referSetpointF - evapUpperDiff >= 13 && referTemperatureAirF > referSetpointF) // upper > 18 degrees and temp above setpoint
+          if (referSetpointF - evapUpperDiff >= 9 && referTemperatureAirF > referSetpointF) // upper > 18 degrees and temp above setpoint
           {
             evapUpperDiff = evapUpperDiff + 1; //if turn with evap at defrost point, lower the temperature band.
             evapLowerDiff = evapUpperDiff + 4;
@@ -438,6 +439,9 @@ Unsure Why...   But that's what I saw when running full steam.
   {
     referCvalue = 0;
     referFanspeed = 255;
+    //referFanspeed = 128;
+    //referFanspeed = referFanbasespeed; //test to see how frosting works.
+
     tcpClient.println("Defrosting");
   }
 
@@ -963,7 +967,7 @@ void setup()
 
   // Start the DS18B20 sensor
   sensors.begin();
-  sensors.setResolution(11);
+  sensors.setResolution(12);  //9-12.   at 11, lowest temp 10.06.   Trying 12.
   getTemps(); //initial pull of temperatures to ensure we have the data on first publish
 
   // ARDUINOOTA START //
