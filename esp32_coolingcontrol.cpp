@@ -225,7 +225,7 @@ void getTemps()
   // to valid device addresses on your bus. Device address can be retrieved
   // by using either oneWire.search(deviceAddress) or individually via
   // sensors.getAddress(deviceAddress, index)
-  DeviceAddress boxThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};
+  DeviceAddress boxThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};  //Family B2.  OK.
   DeviceAddress referThermometerEvap = {0x28, 0xDD, 0x64, 0x1F, 0x2F, 0x14, 0x01, 0x7E}; //mounted port side box lower mid
   DeviceAddress referThermometerAir = {0x28, 0x71, 0xFF, 0x06, 0x2F, 0x14, 0x01, 0x33};  //currently lingering middle Stbd of fridge
   //DeviceAddress freezerThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};       //replace
@@ -239,9 +239,11 @@ void getTemps()
   // delay(10); //give a little time to return.  Does not appear to help??
 
   //temperatureC = sensors.getTempCByIndex(0);
+  int minVal = -60; // range -55 to 125 C.  retry.   Getting -127C/196.60F and sometimes zero, apparent timing after "sensors.requestTemperatures()"
+  int maxVal = 180;
   float temp = sensors.getTempF(compressorBoxThermometer);
 
-  if (temp > 180 || temp < 10)
+  if (temp > maxVal || temp < minVal)
   { // range -55 to 125 C.  retry.   Getting -127C/196.60F and sometimes zero, apparent timing after "sensors.requestTemperatures()"
     Serial.println("ERROR reading Temperature: ");
     client.publish("chilly/error", "ERROR reading compressor box Temperature");
@@ -254,7 +256,7 @@ void getTemps()
 
   temp = sensors.getTempF(boxThermometer);
 
-  if (temp > 180 || temp < 10)
+  if (temp > maxVal || temp < minVal)
   { // range -55 to 125 C.  retry.   Getting -127C/196.60F and sometimes zero, apparent timing after "sensors.requestTemperatures()"
     Serial.println("ERROR reading Temperature: ");
     client.publish("chilly/error", "ERROR reading enclosure Temperature");
@@ -267,7 +269,7 @@ void getTemps()
 
   temp = sensors.getTempF(referThermometerEvap);
 
-  if (temp > 180 || temp < 10)
+  if (temp > maxVal || temp < minVal)
   { // range -55 to 125 C.  retry.   Getting -127C/196.60F and sometimes zero, apparent timing after "sensors.requestTemperatures()"
     Serial.println("ERROR reading Temperature: ");
     client.publish("chilly/refrigerator/error", "ERROR reading Temperature");
@@ -280,7 +282,7 @@ void getTemps()
 
   temp = sensors.getTempF(referThermometerAir);
 
-  if (temp > 180 || temp < 10)
+  if (temp > maxVal || temp < minVal)
   { // range -55 to 125 C.  retry.   Getting -127C/196.60F and sometimes zero, apparent timing after "sensors.requestTemperatures()"
     Serial.println("ERROR reading Temperature: ");
     client.publish("chilly/refrigerator/error", "ERROR reading Temperature");
@@ -293,7 +295,7 @@ void getTemps()
 
   temp = sensors.getTempF(referThermometerEvap); ////change to freezer
 
-  if (temp > 180 || temp < 1)
+  if (temp > maxVal || temp < minVal)
   { // range -55 to 125 C.  retry.   Getting -127C/196.60F, apparent timing after "sensors.requestTemperatures()"
     Serial.println("ERROR reading Temperature: ");
     client.publish("chilly/freezer/error", "ERROR reading Temperature");
@@ -363,14 +365,17 @@ Unsure Why...   But that's what I saw when running full steam.
 */
   tcpClient.print(millis());
   tcpClient.print(": entering cooling control2. ");
-  tcpClient.print("Air Temperature: ");
-  tcpClient.print(referTemperatureAirF);
+  tcpClient.print("Air:");
+  tcpClient.print(referTemperatureAirF);  
+  tcpClient.print(", Evap:");
+  tcpClient.print(referTemperatureEvapF);
   tcpClient.print(", Setpoint: ");
   tcpClient.print(referSetpointF);
   tcpClient.print(", UDiff: ");
   tcpClient.println(evapUpperDiff);
   if (referMode == 0 || referMode == 1)
   {
+    //STARTUP LOGIC
     if (referCvalue == 0 && (referTemperatureEvapF > referSetpointF - evapUpperDiff || referTemperatureAirF >= referSetpointF || referTemperatureEvapF >= 31.0f)) 
     {                                                                               //turn on and set back to lowest value to protect against high startup pressure
       // Serial.print ("turning on compressor \n");
@@ -389,6 +394,7 @@ Unsure Why...   But that's what I saw when running full steam.
     }
     else
     {
+      //RUN LOGIC
       if (referCvalue != 0)
       { //Compressor is ON for remaining block.
         if (referTemperatureAirF > referSetpointF + referSetpointoffsetF)
@@ -416,6 +422,7 @@ Unsure Why...   But that's what I saw when running full steam.
           }
         }
 
+        //SHUTDOWN LOGIC
         if ((referTemperatureEvapF <= referSetpointF - evapLowerDiff || referTemperatureEvapF < 9.0) || (referTemperatureAirF <= referSetpointF - .15 && referTemperatureEvapF < 32.0 )) //12.0f default
         {  //<12.5 works fine.  lowering to 12.0, fine, 11.5, fine, 10--ok.   Drive down to 9 here and 5lines below
           // Serial.print ("at or below cutoff, turning off compressor \n");
@@ -967,7 +974,7 @@ void setup()
 
   // Start the DS18B20 sensor
   sensors.begin();
-  sensors.setResolution(12);  //9-12.   at 11, lowest temp 10.06.   Trying 12.
+  sensors.setResolution(12);  //9-12.   at 11, lowest temp 10.06.   Trying 12-same.10.06.
   getTemps(); //initial pull of temperatures to ensure we have the data on first publish
 
   // ARDUINOOTA START //
