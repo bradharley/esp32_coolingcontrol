@@ -371,7 +371,7 @@ Unsure Why...   But that's what I saw when running full steam.
   tcpClient.println(evapUpperDiff);
   if (referMode == 0 || referMode == 1)
   {
-    if (referCvalue == 0 && referTemperatureEvapF > referSetpointF - evapUpperDiff && (referTemperatureAirF >= referSetpointF || referTemperatureEvapF > 31)) 
+    if (referCvalue == 0 && (referTemperatureEvapF > referSetpointF - evapUpperDiff || referTemperatureAirF >= referSetpointF || referTemperatureEvapF >= 31.0f)) 
     {                                                                               //turn on and set back to lowest value to protect against high startup pressure
       // Serial.print ("turning on compressor \n");
       tcpClient.println("turning on compressor");
@@ -416,13 +416,13 @@ Unsure Why...   But that's what I saw when running full steam.
           }
         }
 
-        if ((referTemperatureEvapF <= referSetpointF - evapLowerDiff || referTemperatureEvapF < 9) || (referTemperatureAirF <= referSetpointF - .15 && referTemperatureEvapF < 32 )) //12.0f default
+        if ((referTemperatureEvapF <= referSetpointF - evapLowerDiff || referTemperatureEvapF < 9.0) || (referTemperatureAirF <= referSetpointF - .15 && referTemperatureEvapF < 32.0 )) //12.0f default
         {  //<12.5 works fine.  lowering to 12.0, fine, 11.5, fine, 10--ok.   Drive down to 9 here and 5lines below
           // Serial.print ("at or below cutoff, turning off compressor \n");
           tcpClient.println("at or below cutoff, turning off compressor");
           referCvalue = 0;
           referFanspeed = 0;                                                                //52; //slow down the fan to off
-          if (referSetpointF - evapUpperDiff >= 9 && referTemperatureAirF > referSetpointF) // upper > 18 degrees and temp above setpoint
+          if (referSetpointF - evapUpperDiff >= 9.0 && referTemperatureAirF > referSetpointF) // upper > 18 degrees and temp above setpoint
           {
             evapUpperDiff = evapUpperDiff + 1; //if turn with evap at defrost point, lower the temperature band.
             evapLowerDiff = evapUpperDiff + 4;
