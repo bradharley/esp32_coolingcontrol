@@ -104,7 +104,7 @@ float compressorBoxTemperatureF;
 int compressorBoxfanspeed = 248; //default 248.  128 is quiet.  Play with noise and temp.  255 is OFF, 0 min spin
 
 float referTemperatureEvapF;        //probe on evaporator
-int referEvapTargetF = 20;            //evaporator target temperature to turn on compressor, auto adjusts.
+int referEvapTargetF = 20;          //evaporator target temperature to turn on compressor, auto adjusts.
 float referTemperatureAirF;         //probe in fan chamber
 int referSetpointF;                 // = 39; // This loads from EEPROM. //target to hold:  39?  ESP32 ONLY
 float referSetpointoffsetF = 3;     //temperature at which full cooling kicks in
@@ -224,7 +224,7 @@ void getTemps()
   // to valid device addresses on your bus. Device address can be retrieved
   // by using either oneWire.search(deviceAddress) or individually via
   // sensors.getAddress(deviceAddress, index)
-  DeviceAddress boxThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};  //Family B2.  OK.
+  DeviceAddress boxThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};       //Family B2.  OK.
   DeviceAddress referThermometerEvap = {0x28, 0xDD, 0x64, 0x1F, 0x2F, 0x14, 0x01, 0x7E}; //mounted port side box lower mid
   DeviceAddress referThermometerAir = {0x28, 0x71, 0xFF, 0x06, 0x2F, 0x14, 0x01, 0x33};  //currently lingering middle Stbd of fridge
   //DeviceAddress freezerThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};       //replace
@@ -361,36 +361,83 @@ void coolingControl2()
 Philosophy is to control temperature by maintaining a somewhat constant evaporator
 temperature while avoiding defrost and melting in refer/freezer.
 */
-  int evapMax = 31;  //stops defrosting
-  int referEvapMin = 9;  //randomly picked value.  Just watch.
-  int evapSwing = 4; //add freezer stuff too.  evapMax and swing should be constant ?
+  int evapMax = 31;       //stops defrosting
+  int referEvapMin = 9;   //randomly picked value.  Just watch.
+  int referEvapSwing = 4; //add freezer stuff too.  evapMax and swing should be constant ?
   tcpClient.print(millis());
   tcpClient.print(": entering cooling control2. ");
   tcpClient.print("Air:");
-  tcpClient.print(referTemperatureAirF);  
+  tcpClient.print(referTemperatureAirF);
   tcpClient.print(", Setpoint: ");
   tcpClient.print(referSetpointF);
   tcpClient.print(", Evap:");
   tcpClient.print(referTemperatureEvapF);
   tcpClient.print(", EvapTarget: ");
-  tcpClient.println(referEvapTargetF);
+  tcpClient.print(referEvapTargetF);
+  tcpClient.print(",referEvapSwing: ");
+  tcpClient.println(referEvapSwing);
   if (referMode == 0 || referMode == 1)
   {
     //STARTUP LOGIC
-    if (referCvalue == 0 && (referTemperatureEvapF >= referEvapTargetF || referTemperatureAirF >= referSetpointF || referTemperatureEvapF >= evapMax )) 
-    {                                                                               //turn on and set back to lowest value to protect against high startup pressure
-      // Serial.print ("turning on compressor \n");
-      tcpClient.println("turning on compressor");
+    if (referCvalue == 0 && (referTemperatureEvapF >= referEvapTargetF || referTemperatureEvapF >= evapMax )) // || referTemperatureAirF - 1 >= referSetpointF
+    { 
+      //turn on and set back to lowest value to protect against high startup pressure. .5 on air temp avoids short starts right above setpoint.
+      // Todo--assess behavior.  Maybe remove entirely air >= setpoint.   causes 1m spikes...
+      
+      Serial.print ("turning on compressor \n");
+      tcpClient.print("turning on compressor because ");
+      if (referTemperatureEvapF >= referEvapTargetF)
+      {
+        tcpClient.print("evaporator is at top target ");
+      }
+      /* temp marked with above
+      if (referTemperatureAirF - 1 >= referSetpointF) //pair number with uppper level if statement.
+      {
+        tcpClient.print("air temp is >= 1 degreeF above setpoint ");
+      }*/
+      if (referTemperatureEvapF >= evapMax)
+      {
+        tcpClient.print("evaporator is at max temp");
+      }
+      tcpClient.println();
       referCvalue = 255; //turn on slowest speed to avoid startup load
       // referFanspeed = referFanbasespeed; //-cool 1 min before turning on fan.  Turn up the fan to default run speed.  96 ran fine , try 128 with smaller fan..   52 minimum?
-      if (referTemperatureAirF < referSetpointF && referEvapTargetF < evapMax )// 
+      if (referTemperatureAirF < referSetpointF && referEvapTargetF < evapMax) //
       {
         referEvapTargetF = referEvapTargetF + 1;
-        //alt test
-        //referCceiling = 255;  //alt test.   Should reduce speed while starting below setpoint
         tcpClient.print("Starting Below Setpoint, evap too cold: increasing evap target to: ");
         tcpClient.println(referEvapTargetF);
       }
+      //logic to change swing if close to evapMax and reduce cooling.  Wintertime
+      if (referTemperatureAirF + 1 <= referSetpointF && referEvapTargetF == evapMax) //ex air 36 setpoint 37 and target at evapMax
+      {
+        if (referEvapSwing != 2)
+        {
+          tcpClient.println("Setting evapSwing to 2.  Too cold in here.");
+          referEvapSwing = 2;
+        }
+        else
+        {
+          tcpClient.println("Keeping evapSwing at 2.  Too cold in here.");
+        }
+        referEvapSwing = 2;
+      }
+      else
+      {
+        if (referEvapSwing != 4)
+        {
+          tcpClient.println("Resetting evapSwing to 4.  Normal cooling needed.");
+          referEvapSwing = 4;
+        }
+        else
+        {
+          tcpClient.println("Keeping evapSwing at 4.  Normal cooling needed.");
+        }
+        referEvapSwing = 4;
+      }
+
+      //alt test
+      //referCceiling = 255;  //alt test.   Should reduce speed while starting below setpoint
     }
     else
     {
@@ -407,7 +454,7 @@ temperature while avoiding defrost and melting in refer/freezer.
           referFanspeed = referFanbasespeed; //hold at base speed, default 96 changeable
           //referFanspeed = 255;                 //Turn up the fan to default max speed.
           //referEvapTargetF = referEvapTargetF - 10; // Assess if necessary
-          referMode = 1;                       //set to max cooling
+          referMode = 1; //set to max cooling
         }
         else
         {                                    //not too hot, normal cooling
@@ -421,15 +468,30 @@ temperature while avoiding defrost and melting in refer/freezer.
         }
 
         //SHUTDOWN LOGIC
-        if ((referTemperatureEvapF <= referEvapTargetF - evapSwing || referTemperatureEvapF < referEvapMin) || (referTemperatureAirF <= referSetpointF - .15 && referTemperatureEvapF < evapMax -1 )) 
-        {  //<12.5 works fine.  lowering to 12.0, fine, 11.5, fine, 10--ok.   Drive down to 9 here and 5lines below
-          // Serial.print ("at or below cutoff, turning off compressor \n");
-          tcpClient.println("at or below cutoff, turning off compressor");
-          referCvalue = 0;
-          referFanspeed = 0;                                                                //52; //slow down the fan to off
-          if (referEvapTargetF - evapSwing >= referEvapMin && referTemperatureAirF > referSetpointF) // upper > 18 degrees and temp above setpoint
+        //if ((referTemperatureEvapF <= referEvapTargetF - referEvapSwing || referTemperatureEvapF < referEvapMin) || (referTemperatureAirF <= referSetpointF && referTemperatureEvapF < evapMax -1 ))
+        if (referTemperatureEvapF <= referEvapTargetF - referEvapSwing || referTemperatureEvapF <= referEvapMin || referTemperatureAirF <= 34) //34 is arbitrary floor
+        // Air add -.25 on setpoint.  Seems to cycle on and off and change evaptarget several degrees rapidly.
+        { //<12.5 works fine.  lowering to 12.0, fine, 11.5, fine, 10--ok.   Drive down to 9 here and 5lines below
+          Serial.print ("at or below cutoff, turning off compressor \n");
+          tcpClient.print("at or below cutoff, turning off compressor because ");
+          if (referTemperatureEvapF <= referEvapTargetF - referEvapSwing)
           {
-            referEvapTargetF = referEvapTargetF - 1; //if turn with evap at defrost point, lower the temperature band.
+            tcpClient.print("evaporator is at bottom target. ");
+          }
+          if (referTemperatureEvapF <= referEvapMin)
+          {
+            tcpClient.println("evaporator is at lowest allowed temp. ");
+          }
+          if (referTemperatureAirF <= 34)
+          {
+            tcpClient.println("air temp is way too cold.  Problem! ");
+          }
+          tcpClient.println();
+          referCvalue = 0;
+          referFanspeed = 0; //52; //slow down the fan to off
+          if (referEvapTargetF - referEvapSwing -2 > referEvapMin  && referTemperatureAirF > referSetpointF) //pair -2 with below to adjust appropriately
+          {
+            referEvapTargetF = referEvapTargetF - 2; //if turn with evap at defrost point, lower the temperature band.
             //alt test
             //referCceiling = 92;
             tcpClient.print("Stopping Above Setpoint, evap too warm: decreasing evap target to: ");
@@ -969,13 +1031,17 @@ void setup()
 
   // Start the DS18B20 sensor
   sensors.begin();
-  sensors.setResolution(12);  //9-12.   at 11, lowest temp 10.06.   Trying 12-same.10.06.
-  getTemps(); //initial pull of temperatures to ensure we have the data on first publish
-  
-  // initial set of referEvapTarget
-  if (referTemperatureAirF < referSetpointF +1 ) //case restarting
-  { 
-    referEvapTargetF = 28; // else default 20. This is a Guess.   Maybe more logic?
+  sensors.setResolution(12); //9-12.   at 11, lowest temp 10.06.   Trying 12-same.10.06.
+  getTemps();                //initial pull of temperatures to ensure we have the data on first publish
+
+  // initial set of referEvapTarget based on current temps
+  if (referTemperatureAirF < referSetpointF + .75) //case restarting close to temp. ex. air 38.74 setpoint 38
+  {
+    referEvapTargetF = 28;
+    if (referTemperatureAirF < referSetpointF - 1) //case restarting at low temp. ex. air 36.9 setpoint 38
+    {
+      referEvapTargetF = 31; // else default 20. This is a Guess.   Maybe more logic?
+    }
   }
   // ARDUINOOTA START //
   // Port defaults to 3232
