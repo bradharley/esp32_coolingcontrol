@@ -358,12 +358,15 @@ uint8_t findDevices(int pin)
 void coolingControl2()
 { //<------------------------------------------------------COOLING CONTROL2
   /*
-Philosophy is to control temperature by maintaining a somewhat constant evaporator
+Philosophy is to:
+1. control temperature by maintaining a somewhat constant evaporator
 temperature while avoiding defrost and melting in refer/freezer.
+2. Turn non based on evaporator temperature, not air temperature, and adjust evaporator
+based on air temp.
 */
   int evapMax = 31;       //stops defrosting
   int referEvapMin = 9;   //randomly picked value.  Just watch.
-  int referEvapSwing = 4; //add freezer stuff too.  evapMax and swing should be constant ?
+  int referEvapSwing = 4; //add freezer stuff too.
   tcpClient.print(millis());
   tcpClient.print(": entering cooling control2. ");
   tcpClient.print("Air:");
@@ -379,12 +382,12 @@ temperature while avoiding defrost and melting in refer/freezer.
   if (referMode == 0 || referMode == 1)
   {
     //STARTUP LOGIC
-    if (referCvalue == 0 && (referTemperatureEvapF >= referEvapTargetF || referTemperatureEvapF >= evapMax )) // || referTemperatureAirF - 1 >= referSetpointF
-    { 
+    if (referCvalue == 0 && (referTemperatureEvapF >= referEvapTargetF || referTemperatureEvapF >= evapMax)) // || referTemperatureAirF - 1 >= referSetpointF
+    {
       //turn on and set back to lowest value to protect against high startup pressure. .5 on air temp avoids short starts right above setpoint.
       // Todo--assess behavior.  Maybe remove entirely air >= setpoint.   causes 1m spikes...
-      
-      Serial.print ("turning on compressor \n");
+
+      Serial.print("turning on compressor \n");
       tcpClient.print("turning on compressor because ");
       if (referTemperatureEvapF >= referEvapTargetF)
       {
@@ -472,7 +475,7 @@ temperature while avoiding defrost and melting in refer/freezer.
         if (referTemperatureEvapF <= referEvapTargetF - referEvapSwing || referTemperatureEvapF <= referEvapMin || referTemperatureAirF <= 34) //34 is arbitrary floor
         // Air add -.25 on setpoint.  Seems to cycle on and off and change evaptarget several degrees rapidly.
         { //<12.5 works fine.  lowering to 12.0, fine, 11.5, fine, 10--ok.   Drive down to 9 here and 5lines below
-          Serial.print ("at or below cutoff, turning off compressor \n");
+          Serial.print("at or below cutoff, turning off compressor \n");
           tcpClient.print("at or below cutoff, turning off compressor because ");
           if (referTemperatureEvapF <= referEvapTargetF - referEvapSwing)
           {
@@ -488,8 +491,8 @@ temperature while avoiding defrost and melting in refer/freezer.
           }
           tcpClient.println();
           referCvalue = 0;
-          referFanspeed = 0; //52; //slow down the fan to off
-          if (referEvapTargetF - referEvapSwing -2 > referEvapMin  && referTemperatureAirF > referSetpointF) //pair -2 with below to adjust appropriately
+          referFanspeed = 0;                                                                                  //52; //slow down the fan to off
+          if (referEvapTargetF - referEvapSwing - 2 >= referEvapMin && referTemperatureAirF > referSetpointF) //pair -2 with below to adjust appropriately
           {
             referEvapTargetF = referEvapTargetF - 2; //if turn with evap at defrost point, lower the temperature band.
             //alt test
@@ -521,6 +524,7 @@ temperature while avoiding defrost and melting in refer/freezer.
   //add in lowest temp sensor logic and mimic refer.   Old code below
 
   //Freezer Section
+  /*
   if (freezerTemperatureF > freezerSetpointF + .5 && freezerCvalue == 0)
   {
     freezerCvalue = freezerCceiling; //set back to lowest based on duty cycle speed
@@ -548,7 +552,7 @@ temperature while avoiding defrost and melting in refer/freezer.
       }
     }
   }
-
+  */
   //Refer Duty cycle stuff
   if (referCvalue == 0)
   {
@@ -572,6 +576,7 @@ temperature while avoiding defrost and melting in refer/freezer.
   }
 
   //Freezer Duty cycle stuff
+  /*
   if (freezerCvalue == 0)
   {
     freezerDutycyclearray[freezerDutycycleindex] = 0;
@@ -592,6 +597,8 @@ temperature while avoiding defrost and melting in refer/freezer.
   {
     freezerDutycycleindex++;
   }
+  */
+ 
   /* //debug
   tcpClient.print(millis());
   tcpClient.print(": referCvalue: ");
