@@ -104,8 +104,7 @@ float compressorBoxTemperatureF;
 int compressorBoxfanspeed = 248; //default 248.  128 is quiet.  Play with noise and temp.  255 is OFF, 0 min spin
 
 float referTemperatureEvapF;        //probe on evaporator
-int evapUpperDiff;                  //set in setup.  evaporator temperature differential below setpoint.  Setpoint 46, holds approx 40 in center.
-int evapLowerDiff;                  //tune for a 10 degree swing. Maybe clean up some day...
+int referEvapTargetF = 20;            //evaporator target temperature to turn on compressor, auto adjusts.
 float referTemperatureAirF;         //probe in fan chamber
 int referSetpointF;                 // = 39; // This loads from EEPROM. //target to hold:  39?  ESP32 ONLY
 float referSetpointoffsetF = 3;     //temperature at which full cooling kicks in
@@ -359,37 +358,38 @@ uint8_t findDevices(int pin)
 void coolingControl2()
 { //<------------------------------------------------------COOLING CONTROL2
   /*
-It appears that min temp at max rpm is 10.06 degrees for evap plate.  Due to sensor!
-Unsure Why...   But that's what I saw when running full steam.
-12degree shutoff seems to be a good safety net.
+Philosophy is to control temperature by maintaining a somewhat constant evaporator
+temperature while avoiding defrost and melting in refer/freezer.
 */
+  int evapMax = 31;
+  int referEvapMin = 9;  //randomly picked value.  Just watch.
+  int evapSwing = 4; //add freezer stuff too.  evapMax and swing should be constant ?
   tcpClient.print(millis());
   tcpClient.print(": entering cooling control2. ");
   tcpClient.print("Air:");
   tcpClient.print(referTemperatureAirF);  
-  tcpClient.print(", Evap:");
-  tcpClient.print(referTemperatureEvapF);
   tcpClient.print(", Setpoint: ");
   tcpClient.print(referSetpointF);
-  tcpClient.print(", UDiff: ");
-  tcpClient.println(evapUpperDiff);
+  tcpClient.print(", Evap:");
+  tcpClient.print(referTemperatureEvapF);
+  tcpClient.print(", EvapTarget: ");
+  tcpClient.println(referEvapTargetF);
   if (referMode == 0 || referMode == 1)
   {
     //STARTUP LOGIC
-    if (referCvalue == 0 && (referTemperatureEvapF > referSetpointF - evapUpperDiff || referTemperatureAirF >= referSetpointF || referTemperatureEvapF >= 31.0f)) 
+    if (referCvalue == 0 && (referTemperatureEvapF >= referEvapTargetF || referTemperatureAirF >= referSetpointF || referTemperatureEvapF >= evapMax )) 
     {                                                                               //turn on and set back to lowest value to protect against high startup pressure
       // Serial.print ("turning on compressor \n");
       tcpClient.println("turning on compressor");
       referCvalue = 255; //turn on slowest speed to avoid startup load
       // referFanspeed = referFanbasespeed; //-cool 1 min before turning on fan.  Turn up the fan to default run speed.  96 ran fine , try 128 with smaller fan..   52 minimum?
-      if (referTemperatureAirF < referSetpointF )// && referSetpointF - evapUpperDiff <= 30) //add second condition to stop defrostXABOVE
+      if (referTemperatureAirF < referSetpointF && referEvapTargetF < evapMax )// 
       {
-        evapUpperDiff = evapUpperDiff - 1; //if Starting below setpoint, raise the temperature band.
-        evapLowerDiff = evapUpperDiff + 4;
+        referEvapTargetF = referEvapTargetF + 1;
         //alt test
         //referCceiling = 255;  //alt test.   Should reduce speed while starting below setpoint
-        tcpClient.print("Below Setpoint: decreasing evap diff to: ");
-        tcpClient.println(evapUpperDiff);
+        tcpClient.print("Starting Below Setpoint, evap too cold: increasing evap target to: ");
+        tcpClient.println(referEvapTargetF);
       }
     }
     else
@@ -397,7 +397,7 @@ Unsure Why...   But that's what I saw when running full steam.
       //RUN LOGIC
       if (referCvalue != 0)
       { //Compressor is ON for remaining block.
-        if (referTemperatureAirF > referSetpointF + referSetpointoffsetF)
+        if (referTemperatureAirF > referSetpointF + referSetpointoffsetF && referMode != 1)
         { //too hot, full cooling
           referCvalue = referCfloor;
           referCceiling = referCfloor;
@@ -406,37 +406,34 @@ Unsure Why...   But that's what I saw when running full steam.
           tcpClient.println("to hot!!!  full speed");
           referFanspeed = referFanbasespeed; //hold at base speed, default 96 changeable
           //referFanspeed = 255;                 //Turn up the fan to default max speed.
-          evapUpperDiff = referSetpointF - 16; // test 16:44=28=16degree upper limit, 12 degree lower: 19 default 46 degree setpoing delivers about 40 degrees inside.  move sensor
-          evapLowerDiff = evapUpperDiff + 4;   // Lower Floor is set to 12 degrees.  Seems to be as low as it will go.
+          //referEvapTargetF = referEvapTargetF - 10; // Assess if necessary
           referMode = 1;                       //set to max cooling
         }
         else
         {                                    //not too hot, normal cooling
           referCvalue = referCceiling;       //set back to ceiling based on duty cycle.  Pair with initial slow startup above
           referFanspeed = referFanbasespeed; //hold at base speed, default 96 changeable
-          evapLowerDiff = evapUpperDiff + 4;
           if (referMode == 1)
           {
-            evapUpperDiff = referSetpointF - 18; //set back 18 degree turn on.
+            //referEvapTargetF = referSetpointF - 18; //Assess if necessary.
             referMode = 0;
           }
         }
 
         //SHUTDOWN LOGIC
-        if ((referTemperatureEvapF <= referSetpointF - evapLowerDiff || referTemperatureEvapF < 9.0) || (referTemperatureAirF <= referSetpointF - .15 && referTemperatureEvapF < 32.0 )) //12.0f default
+        if ((referTemperatureEvapF <= referEvapTargetF - evapSwing || referTemperatureEvapF < referEvapMin) || (referTemperatureAirF <= referSetpointF - .15 && referTemperatureEvapF < evapMax -1 )) 
         {  //<12.5 works fine.  lowering to 12.0, fine, 11.5, fine, 10--ok.   Drive down to 9 here and 5lines below
           // Serial.print ("at or below cutoff, turning off compressor \n");
           tcpClient.println("at or below cutoff, turning off compressor");
           referCvalue = 0;
           referFanspeed = 0;                                                                //52; //slow down the fan to off
-          if (referSetpointF - evapUpperDiff >= 9.0 && referTemperatureAirF > referSetpointF) // upper > 18 degrees and temp above setpoint
+          if (referEvapTargetF - evapSwing >= referEvapMin && referTemperatureAirF > referSetpointF) // upper > 18 degrees and temp above setpoint
           {
-            evapUpperDiff = evapUpperDiff + 1; //if turn with evap at defrost point, lower the temperature band.
-            evapLowerDiff = evapUpperDiff + 4;
+            referEvapTargetF = referEvapTargetF - 1; //if turn with evap at defrost point, lower the temperature band.
             //alt test
             //referCceiling = 92;
-            tcpClient.print("Above Setpoint: increasing evap diff to: ");
-            tcpClient.println(evapUpperDiff);
+            tcpClient.print("Stopping Above Setpoint, evap too warm: decreasing evap target to: ");
+            tcpClient.println(referEvapTargetF);
           }
         }
       }
@@ -914,8 +911,6 @@ void setup()
   referSetpointF = (EEPROM.read(0) << 8) + EEPROM.read(1);    //target to hold:  39?  ESP32 ONLY
   freezerSetpointF = (EEPROM.read(2) << 8) + EEPROM.read(3);  //target to hold:  39?  ESP32 ONLY
   referFanbasespeed = (EEPROM.read(4) << 8) + EEPROM.read(5); //target to hold:  39?  ESP32 ONLY
-  evapUpperDiff = referSetpointF - 18;                        //set to 18 degree evap ceiling.
-  evapLowerDiff = evapUpperDiff + 4;
   // configure PWM functionalitites
   ledcSetup(REFER_PWM_CHANNEL, PWM_FREQ_COMPRESSORS, PWM_RESOLUTION_0);
   ledcSetup(FREEZER_PWM_CHANNEL, PWM_FREQ_COMPRESSORS, PWM_RESOLUTION_0);
