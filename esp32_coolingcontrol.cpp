@@ -361,7 +361,7 @@ void coolingControl2()
 Philosophy is to control temperature by maintaining a somewhat constant evaporator
 temperature while avoiding defrost and melting in refer/freezer.
 */
-  int evapMax = 31;
+  int evapMax = 31;  //stops defrosting
   int referEvapMin = 9;  //randomly picked value.  Just watch.
   int evapSwing = 4; //add freezer stuff too.  evapMax and swing should be constant ?
   tcpClient.print(millis());
@@ -971,7 +971,12 @@ void setup()
   sensors.begin();
   sensors.setResolution(12);  //9-12.   at 11, lowest temp 10.06.   Trying 12-same.10.06.
   getTemps(); //initial pull of temperatures to ensure we have the data on first publish
-
+  
+  // initial set of referEvapTarget
+  if (referTemperatureAirF < referSetpointF +1 ) //case restarting
+  { 
+    referEvapTargetF = 28; // else default 20. This is a Guess.   Maybe more logic?
+  }
   // ARDUINOOTA START //
   // Port defaults to 3232
   // ArduinoOTA.setPort(3232);
