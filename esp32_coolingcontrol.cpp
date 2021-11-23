@@ -365,7 +365,7 @@ temperature while avoiding defrost and melting in refer/freezer.
 based on air temp.
 */
   int evapMax = 31;       //stops defrosting
-  int referEvapMin = 9;   //randomly picked value.  Just watch.
+  int referEvapMin = 12;   //Not bottom of curve, but close.  Works very hard to get below 12. Monitor.
   int referEvapSwing = 4; //add freezer stuff too.
   tcpClient.print(millis());
   tcpClient.print(": entering cooling control2. ");
@@ -598,7 +598,7 @@ based on air temp.
     freezerDutycycleindex++;
   }
   */
- 
+
   /* //debug
   tcpClient.print(millis());
   tcpClient.print(": referCvalue: ");
