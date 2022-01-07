@@ -89,9 +89,13 @@ unsigned long lastStatus = 0; // counter in example code for conn_stat == 5
 unsigned long lastTask = 0;   // counter in example code for conn_stat <> 5
 unsigned long lastWiFiErr = 0;
 unsigned long lastMsg = 0;
-const unsigned long sensorPeriod = 20;  //timing between sensor pulls.  20s default
-const unsigned long coolingPeriod = 30; //in seconds, timing between refrigeration adjustments.  60s default
-const unsigned long ceilingPeriod = 5;  //in minutes, timing between refrigeration adjustments.  5m default
+unsigned long referRunTime = 0;
+unsigned long referCooldownTime = 0;
+const unsigned long sensorPeriod = 20;          //timing between sensor pulls.  20s default
+const unsigned long coolingPeriod = 60;         //in seconds, timing between refrigeration adjustments.  60s default
+const unsigned long ceilingPeriod = 5;          //in minutes, timing between refrigeration adjustments.  5m default
+const unsigned long compressorMaxRunTime = 15;  //in minutes, limit for compressor on time.  10mdefault
+const unsigned long compressorCooldownTime = 2; //in minutes, cooldown after limit for compressor on time.  1mdefault
 
 unsigned long lastSensorReading = sensorPeriod * 1000UL; //set inital value to not wait on first execute.  USE UL for unsigned long multipliction
 unsigned long lastCoolingAdjustment = 0;                 //coolingPeriod * 1000UL;
@@ -364,8 +368,8 @@ temperature while avoiding defrost and melting in refer/freezer.
 2. Turn non based on evaporator temperature, not air temperature, and adjust evaporator
 based on air temp.
 */
-  int evapMax = 31;       //stops defrosting
-  int referEvapMin = 12;   //Not bottom of curve, but close.  Works very hard to get below 12. Monitor.
+  int evapMax = 30;       //stops defrosting
+  int referEvapMin = 9;   //Not bottom of curve, but close.  Works very hard to get below 12. need to increase speed to get lower..
   int referEvapSwing = 4; //add freezer stuff too.
   tcpClient.print(millis());
   tcpClient.print(": entering cooling control2. ");
@@ -378,14 +382,20 @@ based on air temp.
   tcpClient.print(", EvapTarget: ");
   tcpClient.print(referEvapTargetF);
   tcpClient.print(",referEvapSwing: ");
-  tcpClient.println(referEvapSwing);
+  tcpClient.print(referEvapSwing);
+  tcpClient.print(",referRunTime: ");
+  tcpClient.print(referRunTime);
+  tcpClient.print(",referCooldownTime: ");
+  tcpClient.println(referCooldownTime);
   if (referMode == 0 || referMode == 1)
   {
     //STARTUP LOGIC
-    if (referCvalue == 0 && (referTemperatureEvapF >= referEvapTargetF || referTemperatureEvapF >= evapMax)) // || referTemperatureAirF - 1 >= referSetpointF
+    if (referCvalue == 0 && millis() - referCooldownTime >= compressorCooldownTime *60 * 1000 && (referTemperatureEvapF >= referEvapTargetF || referTemperatureEvapF >= evapMax)) // || referTemperatureAirF - 1 >= referSetpointF
     {
       //turn on and set back to lowest value to protect against high startup pressure. .5 on air temp avoids short starts right above setpoint.
       // Todo--assess behavior.  Maybe remove entirely air >= setpoint.   causes 1m spikes...
+
+      referRunTime = millis(); //set counter for runtime
 
       Serial.print("turning on compressor \n");
       tcpClient.print("turning on compressor because ");
@@ -455,7 +465,7 @@ based on air temp.
           client.publish("chilly/refrigerator/lastError", "refer too hot", true);
           tcpClient.println("to hot!!!  full speed");
           referFanspeed = referFanbasespeed; //hold at base speed, default 96 changeable
-          //referFanspeed = 255;                 //Turn up the fan to default max speed.
+          referFanspeed = 192;               //Turn up the fan to default max speed.
           //referEvapTargetF = referEvapTargetF - 10; // Assess if necessary
           referMode = 1; //set to max cooling
         }
@@ -471,8 +481,8 @@ based on air temp.
         }
 
         //SHUTDOWN LOGIC
-        //if ((referTemperatureEvapF <= referEvapTargetF - referEvapSwing || referTemperatureEvapF < referEvapMin) || (referTemperatureAirF <= referSetpointF && referTemperatureEvapF < evapMax -1 ))
-        if (referTemperatureEvapF <= referEvapTargetF - referEvapSwing || referTemperatureEvapF <= referEvapMin || referTemperatureAirF <= 34) //34 is arbitrary floor
+        if ((referTemperatureEvapF <= referEvapTargetF - referEvapSwing || referTemperatureEvapF < referEvapMin) || (referTemperatureAirF <= referSetpointF && referTemperatureEvapF < evapMax - 1))
+        //if (referTemperatureEvapF <= referEvapTargetF - referEvapSwing || referTemperatureEvapF <= referEvapMin || referTemperatureAirF <= 34) //34 is arbitrary floor
         // Air add -.25 on setpoint.  Seems to cycle on and off and change evaptarget several degrees rapidly.
         { //<12.5 works fine.  lowering to 12.0, fine, 11.5, fine, 10--ok.   Drive down to 9 here and 5lines below
           Serial.print("at or below cutoff, turning off compressor \n");
@@ -499,6 +509,16 @@ based on air temp.
             //referCceiling = 92;
             tcpClient.print("Stopping Above Setpoint, evap too warm: decreasing evap target to: ");
             tcpClient.println(referEvapTargetF);
+          }
+        }
+        else  //limit based on max compressor on time
+        {
+          if (millis() - referRunTime >= compressorMaxRunTime * 60 * 1000)
+          {
+            referCooldownTime = millis();
+            tcpClient.print("Stopping because we exceeded max run time for the refer compressor");
+            referCvalue = 0;
+            referFanspeed = 0;
           }
         }
       }
