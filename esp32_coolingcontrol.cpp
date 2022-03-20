@@ -112,7 +112,7 @@ int referEvapTargetF = 20;          //evaporator target temperature to turn on c
 float referTemperatureAirF;         //probe in fan chamber
 int referSetpointF;                 // = 39; // This loads from EEPROM. //target to hold:  39?  ESP32 ONLY
 float referSetpointoffsetF = 3;     //temperature at which full cooling kicks in
-const int referCfloor = 92;         // 92 is approximately full speed....3500rpm
+const int referCfloor = 145;         // 92 is approximately full speed....3500rpm
 int referCminspeed = 255;           //min speed which is fixed mqtt? 255/2000 200/2500 145/3000 92/3500rpm
 int referCceiling = referCminspeed; //current ceiling(min speed) which is adjusted based on duty cycle
 int referCvalue = 0;                //Pin value, 0 off 92 full speed ~2ma 255 low speed ~5ma
