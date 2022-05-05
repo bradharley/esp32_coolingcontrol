@@ -95,7 +95,7 @@ const unsigned long sensorPeriod = 10;          //timing between sensor pulls.  
 const unsigned long coolingPeriod = 60;         //in seconds, timing between refrigeration adjustments.  60s default
 const unsigned long ceilingPeriod = 5;          //in minutes, timing between refrigeration adjustments.  5m default
 const unsigned long compressorMaxRunTime = 15;  //in minutes, limit for compressor on time.  10mdefault
-const unsigned long compressorCooldownTime = 2; //in minutes, cooldown after limit for compressor on time.  1mdefault
+const unsigned long compressorCooldownTime = 3; //in minutes, cooldown after limit for compressor on time.  1mdefault
 
 unsigned long lastSensorReading = sensorPeriod * 1000UL; //set inital value to not wait on first execute.  USE UL for unsigned long multipliction
 unsigned long lastCoolingAdjustment = 0;                 //coolingPeriod * 1000UL;
