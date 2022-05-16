@@ -102,7 +102,7 @@ unsigned long lastCoolingAdjustment = 0;                 //coolingPeriod * 1000U
 unsigned long lastCeilingAdjustment = 0;                 //for adjustceiling function--duty cycle calculation.
 
 //Start Cooling Variables
-int referMode = 0;     // 0 auto, 1 auto max, 2 manual , dutycycle and compressor speed, 8 defrost, 9 off
+int referMode = 0;     // 0 auto, 1 auto max, 2 manual , dutycycle and compressor speed, 7 auto defrost, 8 manual defrost, 9 off
 float boxTemperatureF; //inside esp32 box
 float compressorBoxTemperatureF;
 int compressorBoxfanspeed = 192; //default 248.  128 is quiet.  Play with noise and temp.  255 is OFF, 0 min spin
@@ -112,7 +112,7 @@ int referEvapTargetF = 20;          //evaporator target temperature to turn on c
 float referTemperatureAirF;         //probe in fan chamber
 int referSetpointF;                 // = 39; // This loads from EEPROM. //target to hold:  39?  ESP32 ONLY
 float referSetpointoffsetF = 3;     //temperature at which full cooling kicks in
-const int referCfloor = 145;         // 92 is approximately full speed....3500rpm
+const int referCfloor = 145;        // 92 is approximately full speed....3500rpm
 int referCminspeed = 255;           //min speed which is fixed mqtt? 255/2000 200/2500 145/3000 92/3500rpm
 int referCceiling = referCminspeed; //current ceiling(min speed) which is adjusted based on duty cycle
 int referCvalue = 0;                //Pin value, 0 off 92 full speed ~2ma 255 low speed ~5ma
@@ -468,17 +468,18 @@ based on air temp.
       if (referCvalue != 0)
       { //Compressor is ON for remaining block.
         if (referTemperatureAirF > referSetpointF + referSetpointoffsetF && referMode != 1)
-        { //too hot, full cooling
+        { //too hot, full cooling //comment out totally for testing
+        /*  
           referCvalue = referCfloor;
           referCceiling = referCfloor;
           Serial.println("to hot!!!  full speed");
           client.publish("chilly/refrigerator/lastError", "refer too hot", true);
           tcpClient.println("to hot!!!  full speed");
           referFanspeed = referFanbasespeed; //hold at base speed, default 96 changeable
-          referFanspeed = 192;               //Turn up the fan to default max speed.
+          referFanspeed = 192;               //Turn up the fan to default max speed.//Freezing???
           //referEvapTargetF = referEvapTargetF - 10; // Assess if necessary
           referMode = 1; //set to max cooling
-        }
+        */}
         else
         {                                    //not too hot, normal cooling
           referCvalue = referCceiling;       //set back to ceiling based on duty cycle.  Pair with initial slow startup above
@@ -538,7 +539,24 @@ based on air temp.
       }
     }
   }
-  if (referMode == 8)
+  if (referMode == 7) //auto defrost
+  {
+    referCvalue = 0;
+    referFanspeed = 255;
+    //referFanspeed = 128;
+    //referFanspeed = referFanbasespeed; //test to see how frosting works.
+    if (referTemperatureEvapF > 37.5) //maybe make the 37.5 a variable
+    {
+      referMode = 0;
+      tcpClient.println("Defrosting Complete");
+    }
+    else
+    {
+      tcpClient.println("Defrosting");
+    }
+  }
+
+  if (referMode == 8) //timed defrost
   {
     referCvalue = 0;
     referFanspeed = 255;
