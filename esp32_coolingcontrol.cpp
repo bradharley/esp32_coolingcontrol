@@ -94,8 +94,8 @@ unsigned long referCooldownTime = 0;
 const unsigned long sensorPeriod = 10;          //timing between sensor pulls.  10s default
 const unsigned long coolingPeriod = 60;         //in seconds, timing between refrigeration adjustments.  60s default
 const unsigned long ceilingPeriod = 5;          //in minutes, timing between refrigeration adjustments.  5m default
-const unsigned long compressorMaxRunTime = 15;  //in minutes, limit for compressor on time.  10mdefault
-const unsigned long compressorCooldownTime = 3; //in minutes, cooldown after limit for compressor on time.  1mdefault
+const unsigned long compressorMaxRunTime = 20;  //in minutes, limit for compressor on time.  10mdefault
+const unsigned long compressorCooldownTime = 2; //in minutes, cooldown after limit for compressor on time.  1mdefault
 
 unsigned long lastSensorReading = sensorPeriod * 1000UL; //set inital value to not wait on first execute.  USE UL for unsigned long multipliction
 unsigned long lastCoolingAdjustment = 0;                 //coolingPeriod * 1000UL;
@@ -112,14 +112,14 @@ int referEvapTargetF = 20;          //evaporator target temperature to turn on c
 float referTemperatureAirF;         //probe in fan chamber
 int referSetpointF;                 // = 39; // This loads from EEPROM. //target to hold:  39?  ESP32 ONLY
 float referSetpointoffsetF = 3;     //temperature at which full cooling kicks in
-const int referCfloor = 145;        // 92 is approximately full speed....3500rpm
+const int referCfloor = 92;        // 92 is approximately full speed....3500rpm  145 is 3000
 int referCminspeed = 255;           //min speed which is fixed mqtt? 255/2000 200/2500 145/3000 92/3500rpm
 int referCceiling = referCminspeed; //current ceiling(min speed) which is adjusted based on duty cycle
 int referCvalue = 0;                //Pin value, 0 off 92 full speed ~2ma 255 low speed ~5ma
 int referCspeed = 0;                //approximate RPM  //should probably eliminate and just calculate.
 int referFanspeed = 0;
 int referFanbasespeed; //set base speed vi mqtt and stored in eeprom
-
+const int referDefrostTarget = 39; //38 doesn't melt enough.  Change if move probe.
 float freezerTemperatureF;
 int freezerSetpointF;             // = 0; //This loads from EEPROM //target to hold:  0?   ESP32 ONLY
 float freezerSetpointoffsetF = 5; //temperature at which full cooling kicks in
@@ -468,18 +468,17 @@ based on air temp.
       if (referCvalue != 0)
       { //Compressor is ON for remaining block.
         if (referTemperatureAirF > referSetpointF + referSetpointoffsetF && referMode != 1)
-        { //too hot, full cooling //comment out totally for testing
-        /*  
+        { //too hot, full cooling //comment out totally for testing, will only run 2krpm while hot
           referCvalue = referCfloor;
           referCceiling = referCfloor;
           Serial.println("to hot!!!  full speed");
           client.publish("chilly/refrigerator/lastError", "refer too hot", true);
           tcpClient.println("to hot!!!  full speed");
           referFanspeed = referFanbasespeed; //hold at base speed, default 96 changeable
-          referFanspeed = 192;               //Turn up the fan to default max speed.//Freezing???
+          //referFanspeed = 192;               //Turn up the fan to default max speed.//Freezing???
           //referEvapTargetF = referEvapTargetF - 10; // Assess if necessary
           referMode = 1; //set to max cooling
-        */}
+        }
         else
         {                                    //not too hot, normal cooling
           referCvalue = referCceiling;       //set back to ceiling based on duty cycle.  Pair with initial slow startup above
@@ -545,7 +544,7 @@ based on air temp.
     referFanspeed = 255;
     //referFanspeed = 128;
     //referFanspeed = referFanbasespeed; //test to see how frosting works.
-    if (referTemperatureEvapF > 37.5) //maybe make the 37.5 a variable
+    if (referTemperatureEvapF > referDefrostTarget ) //maybe make the 37.5 a variable
     {
       referMode = 0;
       tcpClient.println("Defrosting Complete");
