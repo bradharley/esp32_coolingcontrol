@@ -1158,11 +1158,10 @@ void setup()
 void loop()
 {
   // start of non-blocking connection setup section
-  // networkcheck();  no reason to continually check and improves performance.  Move to sensor interval which is where the check is valid....
 
-  //conn_stat = 5; //debug with above
+  //conn_stat = 5; //debug with above //lastWiFiErr avail for use as millis
   // start section with tasks where WiFi/MQTT is required
-  if (conn_stat == 5)
+  if (WiFi.status() == WL_CONNECTED)  //do I also need to ensure mqtt connected?
   {
     if (millis() - lastMsg > 5000) //5 seconds.   15s previously
     {                              // Start send status every n sec (just as an example)
@@ -1176,11 +1175,11 @@ void loop()
     //ArduinoOTA.handle();                                            // internal household function for OTA
     client.loop(); // internal household function for MQTT
     handleTCP();
-    networkcheck();
   }
-  else
+  else  //wifi not connected
   {
-    networkcheck();
+    WiFi.disconnect();
+    WiFi.reconnect();
   }
 
   // end of section for tasks where WiFi/MQTT are required
