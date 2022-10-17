@@ -32,10 +32,10 @@ const char *STATUS_MSG = "{\"Message\":\"Refrigeration Controller\"}";
 
 uint8_t conn_stat = 0; // Connection status for WiFi and MQTT:
 /*
-                                              // status |   WiFi   
-                                              // -------+----------
-                                              //      0 |   down   
-                                              //      1 |    up 
+                                              // status |    WiFi   
+                                              // -------+-------------
+                                              //      0 |     up   
+                                              //      1 |    down                                           
 */
 
 //not currently used...   char msg[50];
@@ -1015,6 +1015,7 @@ void setup()
   client.setServer(MQTT_BROKER, 1883);
   client.connect(HOSTNAME);
   client.subscribe("chilly/output");
+  client.subscribe("chilly/output/#");
   client.publish("chilly/status", STATUS_MSG, true); //      send status to broker
   client.publish("chilly/version", VERSION, true);   //      send version to broker
   client.setCallback(callback);
@@ -1084,14 +1085,6 @@ void setup()
   Serial.println("Ready for OTA");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    conn_stat = 1;
-  }
-  else
-  {
-    conn_stat = 0;
-  }
 }
 
 void loop()
@@ -1100,24 +1093,22 @@ void loop()
 
   if (WiFi.status() == WL_CONNECTED)
   {
-    conn_stat = 1;
+    conn_stat = 0; //connected
   }
   else
   {
-    conn_stat = 0;
+    conn_stat = 1; //disconnected
   }
 
-  if (conn_stat == 1) //do I also need to ensure mqtt connected?  //DEBUGGING
+  if (conn_stat == 0) //do I also need to ensure mqtt connected?  //DEBUGGING
   {
     if (millis() - lastMsg > 5000) //5 seconds.   15s previously
     {                              // Start send status every n sec (just as an example)
       getTemps();                  //run when connnected
       lastSensorReading = millis();
       publishmqtt();
-      client.loop();      //      give control to MQTT to send message to broker
-      lastMsg = millis(); //      remember time of last sent status message
-      tcpClient.println(WiFi.status()); //DEBUG
-      tcpClient.println("Checking Wifi in sensor reading block"); //DEBUG
+      client.loop();                                              //      give control to MQTT to send message to broker
+      lastMsg = millis();                                         //      remember time of last sent status message
     }
     //ArduinoOTA.handle();                                            // internal household function for OTA
     client.loop(); // internal household function for MQTT
@@ -1125,19 +1116,14 @@ void loop()
   }
   else //wifi not connected, let's try to reconnect
   {
-    if (millis() - lastWiFiErr > 60000) //only try to reconnect once per minute
+    if (millis() - lastWiFiErr > 30000) //only try to reconnect twice per minute
     {
-      WiFi.disconnect();
-      delay(1000); //Bad practice, maybe release and come back with wifi status.  Test this.
-      WiFi.reconnect();
-      lastWiFiErr = millis();
-      if (WiFi.status() == WL_CONNECTED)
+      if (conn_stat == 1)
       {
-        conn_stat = 1;
-      }
-      else
-      {
-        conn_stat = 0;
+        WiFi.disconnect();
+        delay(1000);  //bad form, but should be very rare
+        WiFi.reconnect();
+        lastWiFiErr = millis();
       }
     }
   }
