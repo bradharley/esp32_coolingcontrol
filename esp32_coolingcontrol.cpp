@@ -32,21 +32,17 @@ const char *STATUS_MSG = "{\"Message\":\"Refrigeration Controller\"}";
 
 uint8_t conn_stat = 0; // Connection status for WiFi and MQTT:
 /*
-                                              // status |   WiFi   |    MQTT
-                                              // -------+----------+------------
-                                              //      0 |   down   |    down
-                                              //      1 | starting |    down
-                                              //      2 |    up    |    down
-                                              //      3 |    up    |  starting
-                                              //      4 |    up    | finalising
-                                              //      5 |    up    |     up
+                                              // status |   WiFi   
+                                              // -------+----------
+                                              //      0 |   down   
+                                              //      1 |    up 
 */
 
 //not currently used...   char msg[50];
 
 // Add your MQTT Broker IP address, example:
 //const char* MQTT_BROKER = "192.168.1.144";
-const char *MQTT_BROKER = "192.168.44.3"; //change to reflect right system.  44.33 on boat
+const char *MQTT_BROKER = "192.168.44.3"; //change to reflect right system.  44.3 on boat
 WiFiClient espClient;
 PubSubClient client(espClient);
 //websocket definition
@@ -112,13 +108,13 @@ int referEvapTargetF = 20;          //evaporator target temperature to turn on c
 float referTemperatureAirF;         //probe in fan chamber
 int referSetpointF;                 // = 39; // This loads from EEPROM. //target to hold:  39?  ESP32 ONLY
 float referSetpointoffsetF = 3;     //temperature at which full cooling kicks in
-const int referCfloor = 92;        // 92 is approximately full speed....3500rpm  145 is 3000
+const int referCfloor = 92;         // 92 is approximately full speed....3500rpm  145 is 3000
 int referCminspeed = 255;           //min speed which is fixed mqtt? 255/2000 200/2500 145/3000 92/3500rpm
 int referCceiling = referCminspeed; //current ceiling(min speed) which is adjusted based on duty cycle
 int referCvalue = 0;                //Pin value, 0 off 92 full speed ~2ma 255 low speed ~5ma
 int referCspeed = 0;                //approximate RPM  //should probably eliminate and just calculate.
 int referFanspeed = 0;
-int referFanbasespeed; //set base speed vi mqtt and stored in eeprom
+int referFanbasespeed;             //set base speed vi mqtt and stored in eeprom
 const int referDefrostTarget = 39; //38 doesn't melt enough.  Change if move probe.
 float freezerTemperatureF;
 int freezerSetpointF;             // = 0; //This loads from EEPROM //target to hold:  0?   ESP32 ONLY
@@ -544,7 +540,7 @@ based on air temp.
     referFanspeed = 255;
     //referFanspeed = 128;
     //referFanspeed = referFanbasespeed; //test to see how frosting works.
-    if (referTemperatureEvapF > referDefrostTarget ) //maybe make the 37.5 a variable
+    if (referTemperatureEvapF > referDefrostTarget) //maybe make the 37.5 a variable
     {
       referMode = 0;
       tcpClient.println("Defrosting Complete");
@@ -781,7 +777,7 @@ void handleTCP()
   {
     if (tcpFirstTime)
     {
-      tcpClient.println("Welcome");
+      tcpClient.println("Welcome Brad");
       Serial.println("Client Connected");
       tcpFirstTime = false;
     }
@@ -956,70 +952,6 @@ void callback(char *topic, byte *message, unsigned int length)
   }
 }
 
-void networkcheck()
-{
-  if ((WiFi.status() != WL_CONNECTED) && (conn_stat != 1))
-  {
-    conn_stat = 0;
-  }
-  if ((WiFi.status() == WL_CONNECTED) && !client.connected() && (conn_stat != 3))
-  {
-    conn_stat = 2;
-  }
-  if ((WiFi.status() == WL_CONNECTED) && client.connected() && (conn_stat != 5))
-  {
-    conn_stat = 4;
-  }
-  //Serial.println(conn_stat); //debug
-  switch (conn_stat)
-  {
-  case 0: // MQTT and WiFi down: start WiFi
-    Serial.println("MQTT and WiFi down: start WiFi");
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(WiFi_SSID, WiFi_PW);
-    conn_stat = 1;
-    break;
-  case 1: // WiFi starting, holding pattern until WiFi up
-    if (millis() - lastWiFiErr > 30000)
-    {
-      Serial.println("WiFi starting, at millis : " + String(millis()));
-      lastWiFiErr = millis();
-    }
-    break;
-  case 2: // WiFi up, MQTT down: start MQTT
-    Serial.println("WiFi up, MQTT down: start MQTT");
-    client.connect(HOSTNAME);
-    server.begin(); //TCP server start
-    conn_stat = 3;
-    break;
-  case 3: // WiFi up, MQTT starting, holding pattern until mqtt up.
-    if (client.connected())
-    {
-      conn_stat = 4;
-    }
-    else
-    {
-      if (millis() - lastWiFiErr > 30000)
-      {
-        Serial.println("WiFi up, MQTT starting, at millis : " + String(millis()));
-        client.connect(HOSTNAME); // retry every time period above.  Do I need to reconnect if 2 fails?
-                                  // not sure if constant retry creates problems...
-        lastWiFiErr = millis();
-      }
-    }
-    break;
-  case 4: // WiFi up, MQTT up: finish MQTT configuration
-    Serial.println("WiFi up, MQTT up: finish MQTT configuration");
-    client.subscribe("chilly/output");
-    client.subscribe("chilly/output/#");
-    //client.subscribe(output_topic);
-    //client.publish("chilly/status", STATUS_MSG, true);               //      send status to broker
-    //client.publish("chilly/version", VERSION, true);             //      send version to broker
-    conn_stat = 5;
-    break;
-  }
-}
-
 void setup()
 {
   setCpuFrequencyMhz(80); //Default is 240mhz, optionally 160 or 80.  DS18b20 periodic error at 80?
@@ -1152,34 +1084,62 @@ void setup()
   Serial.println("Ready for OTA");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
-  networkcheck(); //set initial status.
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    conn_stat = 1;
+  }
+  else
+  {
+    conn_stat = 0;
+  }
 }
 
 void loop()
 {
   // start of non-blocking connection setup section
 
-  //conn_stat = 5; //debug with above //lastWiFiErr avail for use as millis
-  // start section with tasks where WiFi/MQTT is required
-  if (WiFi.status() == WL_CONNECTED)  //do I also need to ensure mqtt connected?
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    conn_stat = 1;
+  }
+  else
+  {
+    conn_stat = 0;
+  }
+
+  if (conn_stat == 1) //do I also need to ensure mqtt connected?  //DEBUGGING
   {
     if (millis() - lastMsg > 5000) //5 seconds.   15s previously
     {                              // Start send status every n sec (just as an example)
       getTemps();                  //run when connnected
       lastSensorReading = millis();
-
       publishmqtt();
       client.loop();      //      give control to MQTT to send message to broker
       lastMsg = millis(); //      remember time of last sent status message
+      tcpClient.println(WiFi.status()); //DEBUG
+      tcpClient.println("Checking Wifi in sensor reading block"); //DEBUG
     }
     //ArduinoOTA.handle();                                            // internal household function for OTA
     client.loop(); // internal household function for MQTT
     handleTCP();
   }
-  else  //wifi not connected
+  else //wifi not connected, let's try to reconnect
   {
-    WiFi.disconnect();
-    WiFi.reconnect();
+    if (millis() - lastWiFiErr > 60000) //only try to reconnect once per minute
+    {
+      WiFi.disconnect();
+      delay(1000); //Bad practice, maybe release and come back with wifi status.  Test this.
+      WiFi.reconnect();
+      lastWiFiErr = millis();
+      if (WiFi.status() == WL_CONNECTED)
+      {
+        conn_stat = 1;
+      }
+      else
+      {
+        conn_stat = 0;
+      }
+    }
   }
 
   // end of section for tasks where WiFi/MQTT are required
