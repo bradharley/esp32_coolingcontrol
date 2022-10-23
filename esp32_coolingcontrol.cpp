@@ -107,7 +107,7 @@ float referTemperatureEvapF;        //probe on evaporator
 int referEvapTargetF = 20;          //evaporator target temperature to turn on compressor, auto adjusts.
 float referTemperatureAirF;         //probe in fan chamber
 int referSetpointF;                 // = 39; // This loads from EEPROM. //target to hold:  39?  ESP32 ONLY
-float referSetpointoffsetF = 3;     //temperature at which full cooling kicks in
+float referSetpointoffsetF = 10;    //temperature at which full cooling kicks in
 const int referCfloor = 92;         // 92 is approximately full speed....3500rpm  145 is 3000
 int referCminspeed = 255;           //min speed which is fixed mqtt? 255/2000 200/2500 145/3000 92/3500rpm
 int referCceiling = referCminspeed; //current ceiling(min speed) which is adjusted based on duty cycle
@@ -115,7 +115,7 @@ int referCvalue = 0;                //Pin value, 0 off 92 full speed ~2ma 255 lo
 int referCspeed = 0;                //approximate RPM  //should probably eliminate and just calculate.
 int referFanspeed = 0;
 int referFanbasespeed;             //set base speed vi mqtt and stored in eeprom
-const int referDefrostTarget = 39; //38 doesn't melt enough.  Change if move probe.
+const int referDefrostTarget = 41; //38 doesn't melt enough.  Change if move probe.
 float freezerTemperatureF;
 int freezerSetpointF;             // = 0; //This loads from EEPROM //target to hold:  0?   ESP32 ONLY
 float freezerSetpointoffsetF = 5; //temperature at which full cooling kicks in
@@ -1107,8 +1107,8 @@ void loop()
       getTemps();                  //run when connnected
       lastSensorReading = millis();
       publishmqtt();
-      client.loop();                                              //      give control to MQTT to send message to broker
-      lastMsg = millis();                                         //      remember time of last sent status message
+      client.loop();      //      give control to MQTT to send message to broker
+      lastMsg = millis(); //      remember time of last sent status message
     }
     //ArduinoOTA.handle();                                            // internal household function for OTA
     client.loop(); // internal household function for MQTT
@@ -1121,8 +1121,11 @@ void loop()
       if (conn_stat == 1)
       {
         WiFi.disconnect();
-        delay(1000);  //bad form, but should be very rare
+        delay(1000); //bad form, but should be very rare
         WiFi.reconnect();
+        //also resubscribe to mqtt.   Case network was alive, no mqtt.   
+        client.subscribe("chilly/output");
+        client.subscribe("chilly/output/#");
         lastWiFiErr = millis();
       }
     }
