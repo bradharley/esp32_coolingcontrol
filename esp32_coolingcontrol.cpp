@@ -1102,13 +1102,24 @@ void loop()
 
   if (conn_stat == 0) //do I also need to ensure mqtt connected?  //DEBUGGING
   {
-    if (millis() - lastMsg > 5000) //5 seconds.   15s previously
-    {                              // Start send status every n sec (just as an example)
-      getTemps();                  //run when connnected
-      lastSensorReading = millis();
-      publishmqtt();
-      client.loop();      //      give control to MQTT to send message to broker
-      lastMsg = millis(); //      remember time of last sent status message
+    if (client.state() == MQTT_DISCONNECTED && millis() - lastWiFiErr > 30000)
+    {
+      //also resubscribe to mqtt.   Case network was alive, no mqtt.
+      client.connect(HOSTNAME);
+      client.subscribe("chilly/output");
+      client.subscribe("chilly/output/#");
+      lastWiFiErr = millis();
+    }
+    else
+    {
+      if (millis() - lastMsg > 5000) //5 seconds.   15s previously
+      {                              // Start send status every n sec (just as an example)
+        getTemps();                  //run when connnected
+        lastSensorReading = millis();
+        publishmqtt();
+        client.loop();      //      give control to MQTT to send message to broker
+        lastMsg = millis(); //      remember time of last sent status message
+      }
     }
     //ArduinoOTA.handle();                                            // internal household function for OTA
     client.loop(); // internal household function for MQTT
@@ -1116,18 +1127,16 @@ void loop()
   }
   else //wifi not connected, let's try to reconnect
   {
-    if (millis() - lastWiFiErr > 30000) //only try to reconnect twice per minute
+    if (conn_stat == 1 && millis() - lastWiFiErr > 30000) //only try to reconnect twice per minute
     {
-      if (conn_stat == 1)
-      {
-        WiFi.disconnect();
-        delay(1000); //bad form, but should be very rare
-        WiFi.reconnect();
-        //also resubscribe to mqtt.   Case network was alive, no mqtt.   
-        client.subscribe("chilly/output");
-        client.subscribe("chilly/output/#");
-        lastWiFiErr = millis();
-      }
+      WiFi.disconnect();
+      delay(1000); //bad form, but should be very rare
+      WiFi.reconnect();
+      //also resubscribe to mqtt.   Case network was alive, no mqtt.
+      client.connect(HOSTNAME);
+      client.subscribe("chilly/output");
+      client.subscribe("chilly/output/#");
+      lastWiFiErr = millis();
     }
   }
 
