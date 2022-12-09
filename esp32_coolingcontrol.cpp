@@ -106,16 +106,20 @@ int compressorBoxfanspeed = 192; //default 248.  128 is quiet.  Play with noise 
 float referTemperatureEvapF;        //probe on evaporator
 int referEvapTargetF = 20;          //evaporator target temperature to turn on compressor, auto adjusts.
 float referTemperatureAirF;         //probe in fan chamber
-int referSetpointF;                 // = 39; // This loads from EEPROM. //target to hold:  39?  ESP32 ONLY
+int referSetpointF;                 // This loads from EEPROM. //target to hold
 float referSetpointoffsetF = 10;    //temperature at which full cooling kicks in
+const int evapMax = 30;                   //stops defrosting
+const int referEvapMin = 8;               //(was 9)Not bottom of curve, but close.  Works very hard to get below 12. need to increase speed to get lower..
+int referEvapSwing = 4;             //was 4, see how 6 works.
 const int referCfloor = 92;         // 92 is approximately full speed....3500rpm  145 is 3000
 int referCminspeed = 255;           //min speed which is fixed mqtt? 255/2000 200/2500 145/3000 92/3500rpm
 int referCceiling = referCminspeed; //current ceiling(min speed) which is adjusted based on duty cycle
 int referCvalue = 0;                //Pin value, 0 off 92 full speed ~2ma 255 low speed ~5ma
 int referCspeed = 0;                //approximate RPM  //should probably eliminate and just calculate.
 int referFanspeed = 0;
-int referFanbasespeed;             //set base speed vi mqtt and stored in eeprom
-const int referDefrostTarget = 41; //38 doesn't melt enough.  Change if move probe.
+int referFanbasespeed;       //set base speed vi mqtt and stored in eeprom
+int referDefrostTarget = 34; //38 doesn't melt enough.  Change if move probe.
+                             // lower to 34 for daily, 40 is good for one big.
 float freezerTemperatureF;
 int freezerSetpointF;             // = 0; //This loads from EEPROM //target to hold:  0?   ESP32 ONLY
 float freezerSetpointoffsetF = 5; //temperature at which full cooling kicks in
@@ -195,6 +199,9 @@ void publishmqtt()
 
   itoa(referMode, tempString, 10); //from integet to char array
   client.publish("chilly/refrigerator/mode", tempString);
+
+  itoa(referDefrostTarget, tempString, 10); //from integet to char array
+  client.publish("chilly/refrigerator/defrostTarget", tempString);
 
   dtostrf(freezerTemperatureF, 1, 2, tempString); //from float to char array
   client.publish("chilly/freezer/temperatureF", tempString);
@@ -364,9 +371,7 @@ temperature while avoiding defrost and melting in refer/freezer.
 2. Turn non based on evaporator temperature, not air temperature, and adjust evaporator
 based on air temp.
 */
-  int evapMax = 30;       //stops defrosting
-  int referEvapMin = 9;   //Not bottom of curve, but close.  Works very hard to get below 12. need to increase speed to get lower..
-  int referEvapSwing = 4; //add freezer stuff too.
+
   tcpClient.print(millis());
   tcpClient.print(": entering cooling control. ");
   tcpClient.print("Air:");
@@ -906,6 +911,11 @@ void callback(char *topic, byte *message, unsigned int length)
     referMode = messageTemp.toInt();
   }
 
+  if (String(topic) == "chilly/output/refrigerator/setDefrostTarget")
+  {
+    referDefrostTarget = messageTemp.toInt();
+  }
+
   if (String(topic) == "chilly/output/refrigerator/setFanSpeed")
   {
     referFanspeed = messageTemp.toInt();
@@ -1102,7 +1112,7 @@ void loop()
 
   if (conn_stat == 0) //do I also need to ensure mqtt connected?  //DEBUGGING
   {
-    if (client.state() == MQTT_DISCONNECTED && millis() - lastWiFiErr > 30000)
+    if (client.state() != MQTT_CONNECTED && millis() - lastWiFiErr > 30000)
     {
       //also resubscribe to mqtt.   Case network was alive, no mqtt.
       client.connect(HOSTNAME);
