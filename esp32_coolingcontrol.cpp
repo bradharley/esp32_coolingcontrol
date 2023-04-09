@@ -101,24 +101,25 @@ unsigned long lastCeilingAdjustment = 0;                 //for adjustceiling fun
 int referMode = 0;     // 0 auto, 1 auto max, 2 manual , dutycycle and compressor speed, 7 auto defrost, 8 manual defrost, 9 off
 float boxTemperatureF; //inside esp32 box
 float compressorBoxTemperatureF;
-int compressorBoxfanspeed = 192; //default 248.  128 is quiet.  Play with noise and temp.  255 is OFF, 0 min spin
+int compressorBoxfanspeed = 104; //default 248.  104 is quiet.  Play with noise and temp.  255 is OFF, 0 min spin
 
 float referTemperatureEvapF;        //probe on evaporator
 int referEvapTargetF = 20;          //evaporator target temperature to turn on compressor, auto adjusts.
-float referTemperatureAirF;         //probe in fan chamber
+float referTemperatureAirF;         //probe above mechanical thermostat
+float referTemperatureCoreF;         //probe center of fridge.
 int referSetpointF;                 // This loads from EEPROM. //target to hold
 float referSetpointoffsetF = 10;    //temperature at which full cooling kicks in
 const int evapMax = 30;                   //stops defrosting
 const int referEvapMin = 8;               //(was 9)Not bottom of curve, but close.  Works very hard to get below 12. need to increase speed to get lower..
 int referEvapSwing = 4;             //was 4, see how 6 works.
-const int referCfloor = 92;         // 92 is approximately full speed....3500rpm  145 is 3000
+const int referCfloor = 120;         // 92 is approximately full speed....3500rpm  145 is 3000
 int referCminspeed = 255;           //min speed which is fixed mqtt? 255/2000 200/2500 145/3000 92/3500rpm
 int referCceiling = referCminspeed; //current ceiling(min speed) which is adjusted based on duty cycle
 int referCvalue = 0;                //Pin value, 0 off 92 full speed ~2ma 255 low speed ~5ma
 int referCspeed = 0;                //approximate RPM  //should probably eliminate and just calculate.
 int referFanspeed = 0;
 int referFanbasespeed;       //set base speed vi mqtt and stored in eeprom
-int referDefrostTarget = 34; //38 doesn't melt enough.  Change if move probe.
+int referDefrostTarget = 37; //38 doesn't melt enough.  Change if move probe.
                              // lower to 34 for daily, 40 is good for one big.
 float freezerTemperatureF;
 int freezerSetpointF;             // = 0; //This loads from EEPROM //target to hold:  0?   ESP32 ONLY
@@ -166,12 +167,19 @@ void publishmqtt()
   dtostrf(referTemperatureK, 1, 2, tempString); //from float to char array
   client.publish("chilly/refrigerator/temperatureK", tempString);
 
-  dtostrf(referTemperatureEvapF, 1, 2, tempString); //from float to char array
-  client.publish("chilly/refrigerator/temperature_testF", tempString);
+  dtostrf(referTemperatureCoreF, 1, 2, tempString); //from float to char array
+  client.publish("chilly/refrigerator/temperatureCoreF", tempString);
 
-  float referTemperatureTestK = (referTemperatureEvapF - 32) * 5 / 9 + 273.15;
-  dtostrf(referTemperatureTestK, 1, 2, tempString); //from float to char array
-  client.publish("chilly/refrigerator/temperature_testK", tempString);
+  float referTemperatureCoreK = (referTemperatureCoreF - 32) * 5 / 9 + 273.15;
+  dtostrf(referTemperatureK, 1, 2, tempString); //from float to char array
+  client.publish("chilly/refrigerator/temperatureCoreK", tempString);
+
+  dtostrf(referTemperatureEvapF, 1, 2, tempString); //from float to char array
+  client.publish("chilly/refrigerator/temperatureEvapF", tempString);
+
+  float referTemperatureEvapK = (referTemperatureEvapF - 32) * 5 / 9 + 273.15;
+  dtostrf(referTemperatureEvapK, 1, 2, tempString); //from float to char array
+  client.publish("chilly/refrigerator/temperatureEvapK", tempString);
 
   itoa(referCvalue, tempString, 10); //from integer to char array
   client.publish("chilly/refrigerator/compressorPinValue", tempString);
@@ -233,7 +241,9 @@ void getTemps()
   // sensors.getAddress(deviceAddress, index)
   DeviceAddress boxThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};       //Family B2.  OK.
   DeviceAddress referThermometerEvap = {0x28, 0xDD, 0x64, 0x1F, 0x2F, 0x14, 0x01, 0x7E}; //mounted port side box lower mid
-  DeviceAddress referThermometerAir = {0x28, 0x71, 0xFF, 0x06, 0x2F, 0x14, 0x01, 0x33};  //currently lingering middle Stbd of fridge
+  DeviceAddress referThermometerCore = {0x28, 0x71, 0xFF, 0x06, 0x2F, 0x14, 0x01, 0x33};  //currently lingering middle of fridge
+  DeviceAddress referThermometerAir = {0x28, 0xAA, 0x4B, 0xCD, 0x18, 0x13, 0x02, 0xDA};  //Above Mechanical Thermostat
+
   //DeviceAddress freezerThermometer = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};       //replace
   //DeviceAddress freezerThermometerTest = {0x28, 0xFF, 0xD1, 0x53, 0x6E, 0x18, 0x01, 0x1E};   //replace
   DeviceAddress compressorBoxThermometer = {0x28, 0x81, 0xC1, 0x26, 0x2F, 0x14, 0x01, 0x17}; //near compressors
@@ -299,17 +309,17 @@ void getTemps()
     Serial.println(referTemperatureAirF);
   }
 
-  temp = sensors.getTempF(referThermometerEvap); ////change to freezer
+  temp = sensors.getTempF(referThermometerCore);
 
   if (temp > maxVal || temp < minVal)
-  { // range -55 to 125 C.  retry.   Getting -127C/196.60F, apparent timing after "sensors.requestTemperatures()"
+  { // range -55 to 125 C.  retry.   Getting -127C/196.60F and sometimes zero, apparent timing after "sensors.requestTemperatures()"
     Serial.println("ERROR reading Temperature: ");
-    client.publish("chilly/freezer/error", "ERROR reading Temperature");
+    client.publish("chilly/refrigerator/error", "ERROR reading Temperature");
   }
   else
   {
-    freezerTemperatureF = temp;
-    Serial.println(freezerTemperatureF);
+    referTemperatureCoreF = temp;
+    Serial.println(referTemperatureCoreF);
   }
 }
 
