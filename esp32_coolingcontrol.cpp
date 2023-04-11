@@ -104,14 +104,14 @@ float compressorBoxTemperatureF;
 int compressorBoxfanspeed = 104; //default 248.  104 is quiet.  Play with noise and temp.  255 is OFF, 0 min spin
 
 float referTemperatureEvapF;        //probe on evaporator
-int referEvapTargetF = 20;          //evaporator target temperature to turn on compressor, auto adjusts.
+int referEvapTargetF = 17;          //evaporator target temperature to turn on compressor, auto adjusts.
 float referTemperatureAirF;         //probe above mechanical thermostat
 float referTemperatureCoreF;         //probe center of fridge.
 int referSetpointF;                 // This loads from EEPROM. //target to hold
 float referSetpointoffsetF = 10;    //temperature at which full cooling kicks in
 const int evapMax = 30;                   //stops defrosting
 const int referEvapMin = 8;               //(was 9)Not bottom of curve, but close.  Works very hard to get below 12. need to increase speed to get lower..
-int referEvapSwing = 4;             //was 4, see how 6 works.
+int referEvapSwing = 5;             //was 4, 6 too much, see how 5 works.
 const int referCfloor = 120;         // 92 is approximately full speed....3500rpm  145 is 3000
 int referCminspeed = 255;           //min speed which is fixed mqtt? 255/2000 200/2500 145/3000 92/3500rpm
 int referCceiling = referCminspeed; //current ceiling(min speed) which is adjusted based on duty cycle
