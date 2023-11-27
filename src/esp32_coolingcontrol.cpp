@@ -27,7 +27,7 @@
 const char *HOSTNAME = "chilly"; // change according your setup : it is used in OTA and as MQTT identifier
 const char *WiFi_SSID = "SVPerspective";
 const char *WiFi_PW = "8187314277";
-const char *VERSION = "{\"Version\":\"0.52\"}";
+const char *VERSION = "{\"Version\":\"0.60\"}"; //new branch plus isotherm  
 const char *STATUS_MSG = "{\"Message\":\"Refrigeration Controller\"}";
 
 uint8_t conn_stat = 0; // Connection status for WiFi and MQTT:
